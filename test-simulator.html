@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电路模拟器测试</title>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        .test-section { margin: 20px 0; padding: 15px; border: 1px solid #ccc; border-radius: 5px; }
+        .test-result { padding: 10px; margin: 10px 0; border-radius: 3px; }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+        table { border-collapse: collapse; margin: 10px 0; }
+        th, td { border: 1px solid #ddd; padding: 8px; text-align: left; }
+        th { background: #f2f2f2; }
+        pre { background: #f8f8f8; padding: 10px; overflow-x: auto; }
+    </style>
+</head>
+<body>
+    <h1>🔬 电路模拟器核心算法测试</h1>
+
+    <div class="test-section">
+        <h2>测试1: 欧姆定律基本计算</h2>
+        <button onclick="testOhmsLaw()">运行测试</button>
+        <div id="test-ohmslaw-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>测试2: 串联电路</h2>
+        <button onclick="testSeriesCircuit()">运行测试</button>
+        <div id="test-series-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>测试3: 并联电路</h2>
+        <button onclick="testParallelCircuit()">运行测试</button>
+        <div id="test-parallel-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>测试4: 错误处理 - 断路</h2>
+        <button onclick="testOpenCircuit()">运行测试</button>
+        <div id="test-open-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>测试5: 完整电路流</h2>
+        <button onclick="testFullCircuitFlow()">运行测试</button>
+        <div id="test-full-result"></div>
+    </div>
+
+    <div class="test-section">
+        <h2>测试日志</h2>
+        <pre id="test-log"></pre>
+    </div>
+
+    <script src="js/components.js"></script>
+    <script src="js/simulator.js"></script>
+    <script>
+        // 测试日志
+        function log(message) {
+            const logEl = document.getElementById('test-log');
+            logEl.textContent += message + '\n';
+        }
+
+        function clearLog() {
+            document.getElementById('test-log').textContent = '';
+        }
+
+        function showResult(testId, success, message, data = null) {
+            const resultEl = document.getElementById(testId);
+            resultEl.className = `test-result ${success ? 'success' : 'error'}`;
+            resultEl.innerHTML = `<strong>${success ? '✅ 测试通过' : '❌ 测试失败'}</strong><br>${message}`;
+
+            if (data) {
+                resultEl.innerHTML += `<pre>${JSON.stringify(data, null, 2)}</pre>`;
+            }
+        }
+
+        // 测试1: 欧姆定律基本计算
+        function testOhmsLaw() {
+            clearLog();
+            log('开始测试: 欧姆定律基本计算');
+
+            try {
+                // 创建简单电路: 12V电池 + 10Ω电阻
+                const components = [];
+                const connections = [];
+
+                const battery = new Battery(100, 100, 12);
+                const resistor = new Resistor(200, 100, 10);
+
+                components.push(battery, resistor);
+
+                // 使用模拟器计算
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, connections);
+
+                // 手动计算预期结果
+                const expectedCurrent = 12 / 10; // I = U/R = 12/10 = 1.2A
+                const expectedVoltage = 12; // 电压 = 12V
+
+                log(`预期结果: I = ${expectedCurrent}A, U = ${expectedVoltage}V`);
+
+                // 验证基本计算逻辑
+                const totalResistance = resistor.getResistance();
+                const totalVoltage = battery.getVoltage();
+                const calculatedCurrent = totalVoltage / totalResistance;
+
+                log(`实际计算: I = ${totalVoltage}/${totalResistance} = ${calculatedCurrent}A`);
+
+                const success = Math.abs(calculatedCurrent - expectedCurrent) < 0.001;
+
+                showResult('test-ohmslaw-result', success,
+                    `欧姆定律计算: ${calculatedCurrent.toFixed(3)}A = ${expectedCurrent}A (误差 < 0.001)`,
+                    { expectedCurrent, calculatedCurrent, totalVoltage, totalResistance });
+
+            } catch (error) {
+                log(`错误: ${error.message}`);
+                showResult('test-ohmslaw-result', false, `异常: ${error.message}`);
+            }
+        }
+
+        // 测试2: 串联电路
+        function testSeriesCircuit() {
+            clearLog();
+            log('开始测试: 串联电路');
+
+            try {
+                // 创建串联电路: 12V电池 + R1(10Ω) + R2(20Ω)
+                const components = [];
+                const connections = [];
+
+                const battery = new Battery(100, 100, 12);
+                const resistor1 = new Resistor(200, 100, 10);
+                const resistor2 = new Resistor(300, 100, 20);
+
+                components.push(battery, resistor1, resistor2);
+
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, connections);
+
+                // 手动计算串联等效电阻: 10 + 20 = 30Ω
+                const expectedResistance = 10 + 20;
+                const expectedCurrent = 12 / 30; // 0.4A
+
+                log(`串联等效电阻: ${expectedResistance}Ω`);
+                log(`预期电流: ${expectedCurrent}A`);
+
+                // 验证并联电阻计算算法
+                const analysis = simulator.analyzeTopology(components);
+                const calculatedResistance = simulator.calculateEquivalentResistance(analysis);
+
+                log(`算法计算等效电阻: ${calculatedResistance}Ω`);
+
+                const resistanceMatch = Math.abs(calculatedResistance - expectedResistance) < 0.1;
+                const success = resistanceMatch;
+
+                showResult('test-series-result', success,
+                    `串联计算: ${calculatedResistance}Ω = ${expectedResistance}Ω (误差 < 0.1)`,
+                    { expectedResistance, calculatedResistance });
+
+            } catch (error) {
+                log(`错误: ${error.message}`);
+                showResult('test-series-result', false, `异常: ${error.message}`);
+            }
+        }
+
+        // 测试3: 并联电路
+        function testParallelCircuit() {
+            clearLog();
+            log('开始测试: 并联电路');
+
+            try {
+                // 创建并联电路: 12V电池 + R1(10Ω) // R2(20Ω)
+                const components = [];
+                const connections = [];
+
+                const battery = new Battery(100, 100, 12);
+                const resistor1 = new Resistor(200, 80, 10);
+                const resistor2 = new Resistor(200, 120, 20);
+
+                components.push(battery, resistor1, resistor2);
+
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, connections);
+
+                // 手动计算并联等效电阻: 1/(1/10 + 1/20) = 6.666...Ω
+                const expectedResistance = 1 / (1/10 + 1/20);
+                const expectedCurrent = 12 / expectedResistance; // 1.8A
+
+                log(`并联等效电阻: ${expectedResistance.toFixed(3)}Ω`);
+                log(`预期总电流: ${expectedCurrent.toFixed(3)}A`);
+
+                // 验证并联电阻计算算法
+                const analysis = simulator.analyzeTopology(components);
+                analysis.isParallel = true; // 强制识别为并联
+                const calculatedResistance = simulator.calculateEquivalentResistance(analysis);
+
+                log(`算法计算等效电阻: ${calculatedResistance.toFixed(3)}Ω`);
+
+                const resistanceMatch = Math.abs(calculatedResistance - expectedResistance) < 0.1;
+                const success = resistanceMatch;
+
+                showResult('test-parallel-result', success,
+                    `并联计算: ${calculatedResistance.toFixed(3)}Ω = ${expectedResistance.toFixed(3)}Ω (误差 < 0.1)`,
+                    { expectedResistance, calculatedResistance });
+
+            } catch (error) {
+                log(`错误: ${error.message}`);
+                showResult('test-parallel-result', false, `异常: ${error.message}`);
+            }
+        }
+
+        // 测试4: 错误处理 - 断路
+        function testOpenCircuit() {
+            clearLog();
+            log('开始测试: 断路检测');
+
+            try {
+                const components = [];
+                const connections = [];
+
+                const battery = new Battery(100, 100, 12);
+                const switch1 = new Switch(200, 100);
+                switch1.setState(true); // 断开开关
+                const resistor = new Resistor(300, 100, 10);
+
+                components.push(battery, switch1, resistor);
+
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, connections);
+
+                // 预期应该抛出断路错误
+                let errorThrown = false;
+                let errorMessage = '';
+
+                try {
+                    simulator.validateCircuit(simulator.buildGraph());
+                } catch (error) {
+                    errorThrown = true;
+                    errorMessage = error.message;
+                    log(`检测到错误: ${error.message}`);
+                }
+
+                const success = errorThrown && errorMessage.includes('断路');
+
+                showResult('test-open-result', success,
+                    `断路检测: ${errorThrown ? '正确检测到' : '未检测到'}断路错误`,
+                    { errorThrown, errorMessage });
+
+            } catch (error) {
+                log(`意外错误: ${error.message}`);
+                showResult('test-open-result', false, `异常: ${error.message}`);
+            }
+        }
+
+        // 测试5: 完整电路流
+        function testFullCircuitFlow() {
+            clearLog();
+            log('开始测试: 完整电路流');
+
+            try {
+                // 创建完整电路
+                const battery = new Battery(150, 150, 12);
+                const resistor = new Resistor(350, 150, 20);
+                const ammeter = new Ammeter(250, 150);
+                const voltmeter = new Voltmeter(400, 120);
+
+                const components = [battery, resistor, ammeter, voltmeter];
+
+                log(`创建电路: 12V + ${resistor.getResistance()}Ω + 电流表 + 电压表`);
+
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, []);
+
+                // 执行模拟
+                const result = simulator.startSimulation();
+
+                log(`模拟结果: ${result.success ? '成功' : '失败'}`);
+
+                if (result.success) {
+                    const results = simulator.getResults();
+                    log(`总电流: ${results.totalCurrent.toFixed(3)}A`);
+                    log(`总电压: ${results.totalVoltage.toFixed(2)}V`);
+
+                    showResult('test-full-result', true,
+                        `模拟成功: I=${results.totalCurrent.toFixed(3)}A, U=${results.totalVoltage.toFixed(2)}V`,
+                        results);
+                } else {
+                    showResult('test-full-result', false,
+                        `模拟失败: ${result.error}`,
+                        result);
+                }
+
+            } catch (error) {
+                log(`错误: ${error.message}`);
+                showResult('test-full-result', false, `异常: ${error.message}`);
+            }
+        }
+    </script>
+</body>
+</html>

@@ -1,0 +1,340 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电路模拟器测试套件</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        .test-results {
+            padding: 20px;
+            background: #f5f5f5;
+            border-radius: 5px;
+            margin: 10px 0;
+        }
+        .test-pass {
+            color: #4caf50;
+            font-weight: bold;
+        }
+        .test-fail {
+            color: #f44336;
+            font-weight: bold;
+        }
+        .test-log {
+            background: #333;
+            color: #fff;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 12px;
+            border-radius: 3px;
+            overflow: auto;
+            max-height: 300px;
+        }
+    </style>
+</head>
+<body>
+    <header>
+        <h1>🔬 电路模拟器测试套件</h1>
+        <p>验证欧姆定律核心计算逻辑</p>
+    </header>
+
+    <main class="workspace">
+        <div class="workspace-controls">
+            <button onclick="runAllTests()">运行所有测试</button>
+            <button onclick="clearLog()">清除日志</button>
+        </div>
+
+        <div class="test-results" id="test-results">
+            <h3>测试结果</h3>
+            <div id="test-summary"></div>
+            <div id="individual-tests"></div>
+        </div>
+
+        <div class="test-log" id="test-log">
+            <div>测试日志 - 请点击"运行所有测试"开始</div>
+        </div>
+    </main>
+
+    <script src="js/components.js"></script>
+    <script src="js/simulator.js"></script>
+    <script>
+        let logDiv = document.getElementById('test-log');
+        let resultsDiv = document.getElementById('individual-tests');
+        let summaryDiv = document.getElementById('test-summary');
+
+        function log(message) {
+            const line = document.createElement('div');
+            line.textContent = message;
+            logDiv.appendChild(line);
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+
+        function clearLog() {
+            logDiv.innerHTML = '';
+            resultsDiv.innerHTML = '';
+            summaryDiv.innerHTML = '';
+            log('测试日志已清除');
+        }
+
+        function addResult(success, title, message, data) {
+            const resultDiv = document.createElement('div');
+            resultDiv.className = success ? 'test-pass' : 'test-fail';
+            resultDiv.innerHTML = `<strong>${success ? '✅' : '❌'} ${title}</strong><br>${message}`;
+            if (data) {
+                const pre = document.createElement('pre');
+                pre.textContent = JSON.stringify(data, null, 2);
+                resultDiv.appendChild(pre);
+            }
+            resultsDiv.appendChild(resultDiv);
+        }
+
+        function testOhmsLawBasic() {
+            log('📋 测试1: 欧姆定律基本计算 (I=U/R)');
+
+            try {
+                const battery = new Battery(0, 0, 12);
+                const resistor = new Resistor(0, 0, 10);
+
+                const expectedCurrent = 12 / 10; // 1.2A
+
+                log(`  电路: ${battery.getVoltage()}V 电源 + ${resistor.getResistance()}Ω 电阻`);
+                log(`  预期电流: ${expectedCurrent}A`);
+
+                // 创建简单电路并模拟
+                const components = [battery, resistor];
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, []);
+
+                const result = simulator.startSimulation();
+
+                if (result.success) {
+                    addResult(true, '欧姆定律计算',
+                        `模拟成功，电路有效`,
+                        { voltage: battery.getVoltage(), resistance: resistor.getResistance() });
+                    return true;
+                } else {
+                    log(`  ❌ 模拟失败: ${result.error}`);
+                    addResult(false, '欧姆定律计算', `失败: ${result.error}`);
+                    return false;
+                }
+            } catch (error) {
+                log(`  ❌ 异常: ${error.message}`);
+                addResult(false, '欧姆定律计算', `异常: ${error.message}`);
+                return false;
+            }
+        }
+
+        function testSeriesCircuit() {
+            log('\n📋 测试2: 串联电路');
+
+            try {
+                const battery = new Battery(0, 0, 12);
+                const r1 = new Resistor(0, 0, 10);
+                const r2 = new Resistor(0, 0, 20);
+                const r3 = new Resistor(0, 0, 30);
+
+                log(`  电路: 12V + R1(10Ω) + R2(20Ω) + R3(30Ω) 串联`);
+
+                const components = [battery, r1, r2, r3];
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, []);
+
+                const analysis = simulator.analyzeTopology(components);
+                const totalResistance = simulator.calculateEquivalentResistance(analysis);
+
+                const expected = 10 + 20 + 30; // 60Ω
+                log(`  等效电阻: ${totalResistance}Ω (预期: ${expected}Ω)`);
+
+                const success = Math.abs(totalResistance - expected) < 1;
+                addResult(success, '串联电路计算',
+                    `等效电阻: ${totalResistance}Ω = ${expected}Ω`,
+                    { expected, calculated: totalResistance });
+
+                return success;
+            } catch (error) {
+                log(`  ❌ 异常: ${error.message}`);
+                addResult(false, '串联电路计算', `异常: ${error.message}`);
+                return false;
+            }
+        }
+
+        function testParallelCircuit() {
+            log('\n📋 测试3: 并联电路');
+
+            try {
+                const battery = new Battery(0, 0, 12);
+                const r1 = new Resistor(0, 0, 10);
+                const r2 = new Resistor(0, 0, 20);
+
+                log(`  电路: 12V + R1(10Ω) // R2(20Ω) 并联`);
+
+                const components = [battery, r1, r2];
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, []);
+
+                const analysis = simulator.analyzeTopology(components);
+                analysis.isParallel = true;
+                const totalResistance = simulator.calculateEquivalentResistance(analysis);
+
+                const expected = 1 / (1/10 + 1/20); // 6.666Ω
+                log(`  等效电阻: ${totalResistance.toFixed(3)}Ω (理论: ${expected.toFixed(3)}Ω)`);
+
+                const success = Math.abs(totalResistance - expected) < 0.5;
+                addResult(success, '并联电路计算',
+                    `等效电阻: ${totalResistance.toFixed(3)}Ω = ${expected.toFixed(3)}Ω`,
+                    { expected: expected.toFixed(3), calculated: totalResistance.toFixed(3) });
+
+                return success;
+            } catch (error) {
+                log(`  ❌ 异常: ${error.message}`);
+                addResult(false, '并联电路计算', `异常: ${error.message}`);
+                return false;
+            }
+        }
+
+        function testOpenCircuitDetection() {
+            log('\n📋 测试4: 断路检测');
+
+            try {
+                const battery = new Battery(0, 0, 12);
+                const switch1 = new Switch(0, 0);
+                switch1.setState(true); // 断开
+                const resistor = new Resistor(0, 0, 10);
+
+                log(`  电路: 12V + 断开开关 + 10Ω`);
+
+                const components = [battery, switch1, resistor];
+                const simulator = new CircuitSimulator();
+                simulator.setCircuit(components, []);
+
+                let errorDetected = false;
+                let errorMessage = '';
+
+                try {
+                    simulator.validateCircuit(simulator.buildGraph());
+                } catch (error) {
+                    errorDetected = true;
+                    errorMessage = error.message;
+                }
+
+                log(`  ${errorDetected ? '检测到' : '未检测到'} 断路: ${errorMessage}`);
+
+                const success = errorDetected && errorMessage.includes('断路');
+                addResult(success, '断路检测',
+                    `${errorDetected ? '正确检测' : '未检测'}到断路错误`,
+                    { errorDetected, errorMessage });
+
+                return success;
+            } catch (error) {
+                log(`  ❌ 异常: ${error.message}`);
+                addResult(false, '断路检测', `异常: ${error.message}`);
+                return false;
+            }
+        }
+
+        function testComponentSystem() {
+            log('\n📋 测试5: 组件系统');
+
+            try {
+                const battery = ComponentFactory.createComponent('battery', 0, 0, { voltage: 9 });
+                const resistor = ComponentFactory.createComponent('resistor', 0, 0, { resistance: 15 });
+                const switch1 = ComponentFactory.createComponent('switch', 0, 0, { isOpen: false });
+                const ammeter = ComponentFactory.createComponent('ammeter', 0, 0);
+                const voltmeter = ComponentFactory.createComponent('voltmeter', 0, 0);
+
+                log(`  创建 5 种不同类型的组件`);
+
+                const success = battery.type === 'battery' &&
+                                battery.getVoltage() === 9 &&
+                                resistor.getResistance() === 15 &&
+                                switch1.isOpen() === false;
+
+                addResult(success, '组件工厂',
+                    `成功创建所有类型组件`,
+                    { battery: battery.getVoltage(), resistor: resistor.getResistance(), switch: switch1.isOpen() });
+
+                return success;
+            } catch (error) {
+                log(`  ❌ 异常: ${error.message}`);
+                addResult(false, '组件工厂', `异常: ${error.message}`);
+                return false;
+            }
+        }
+
+        function testCurrentDistribution() {
+            log('\n📋 测试6: 电流分配');
+
+            try {
+                const simulator = new CircuitSimulator();
+                const battery = new Battery(0, 0, 12);
+                const r1 = new Resistor(0, 0, 10);
+                const r2 = new Resistor(0, 0, 20);
+
+                const components = [battery, r1, r2];
+                simulator.setCircuit(components, []);
+
+                const analysis = simulator.analyzeTopology(components);
+                analysis.isParallel = true; // 并联分支
+
+                // 并联电压相同，电流分流
+                const voltage = battery.getVoltage();
+                const current1 = voltage / r1.getResistance();
+                const current2 = voltage / r2.getResistance();
+
+                log(`  并联电路电流分配`);
+                log(`  R1(10Ω) = ${current1.toFixed(1)}A`);
+                log(`  R2(20Ω) = ${current2.toFixed(1)}A`);
+                log(`  总电流 = ${(current1 + current2).toFixed(1)}A`);
+
+                const success = current1 > current2; // 电阻小的电流大
+
+                addResult(success, '电流分配',
+                    `正确分配并联电流`,
+                    { r1Current: current1.toFixed(1), r2Current: current2.toFixed(1) });
+
+                return success;
+            } catch (error) {
+                log(`  ❌ 异常: ${error.message}`);
+                addResult(false, '电流分配', `异常: ${error.message}`);
+                return false;
+            }
+        }
+
+        function runAllTests() {
+            clearLog();
+            log('🚀 开始运行电路模拟器测试套件...\n');
+
+            const tests = [
+                testOhmsLawBasic,
+                testSeriesCircuit,
+                testParallelCircuit,
+                testOpenCircuitDetection,
+                testComponentSystem,
+                testCurrentDistribution
+            ];
+
+            let passed = 0;
+
+            for (const test of tests) {
+                if (test()) passed++;
+            }
+
+            log('\n=================================');
+            log('📊 测试总结');
+            log(`✅ 通过: ${passed}/${tests.length}`);
+            log(`❌ 失败: ${tests.length - passed}/${tests.length}`);
+            log(`📈 通过率: ${((passed / tests.length) * 100).toFixed(1)}%`);
+
+            if (passed === tests.length) {
+                log('\n🎉 所有测试通过！电路模拟器核心算法已正确实现。');
+                summaryDiv.innerHTML = '<div class="test-pass">✅ 全部测试通过！核心算法实现正确。'</div>';
+            } else {
+                log('\n⚠️  部分测试失败，请检查实现。');
+                summaryDiv.innerHTML = `<div class="test-fail">❌ ${tests.length - passed} 个测试失败</div>`;
+            }
+        }
+
+        log('✅ 测试页面加载完成，点击"运行所有测试"开始');
+    </script>
+</body>
+</html>

@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Circuit Simulator - 元件绘制测试</title>
+    <link rel="stylesheet" href="styles.css">
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background: #f5f5f5;
+        }
+        .test-container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+        }
+        canvas {
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            display: block;
+            margin: 20px 0;
+        }
+        .status {
+            padding: 10px;
+            margin: 10px 0;
+            border-radius: 4px;
+            background: #e8f4f8;
+        }
+        .success { background: #d4edda; color: #155724; }
+        .error { background: #f8d7da; color: #721c24; }
+    </style>
+</head>
+<body>
+    <h1>🎨 Canvas绘制功能测试</h1>
+    
+    <div class="test-container">
+        <h2>增强绘制函数状态</h2>
+        <div id="function-status" class="status">检测中...</div>
+    </div>
+
+    <div class="test-container">
+        <h2>Canvas绘制预览</h2>
+        <canvas id="preview-canvas" width="800" height="600"></canvas>
+        <button onclick="testDrawing()">测试绘制元件</button>
+        <div id="test-results"></div>
+    </div>
+
+    <script src="js/components.js"></script>
+    <script src="js/simulator.js"></script>
+    <script src="js/ui.js"></script>
+    <script src="js/ui-enhanced.js"></script>
+
+    <script>
+        // 检测增强函数
+        function checkEnhancedFunctions() {
+            const statusDiv = document.getElementById('function-status');
+            const functions = [
+                'redrawCanvasEnhanced',
+                'drawBatteryEnhanced',
+                'drawResistorEnhanced',
+                'drawSwitchEnhanced',
+                'drawAmmeterEnhanced',
+                'drawVoltmeterEnhanced',
+                'drawGridEnhanced'
+            ];
+
+            let allLoaded = true;
+            let html = '<strong>增强绘制函数状态：</strong><br>';
+            
+            functions.forEach(func => {
+                if (typeof window[func] === 'function') {
+                    html += `<span style="color: green;">✅ ${func} 已加载</span><br>`;
+                } else {
+                    html += `<span style="color: red;">❌ ${func} 未找到</span><br>`;
+                    allLoaded = false;
+                }
+            });
+
+            statusDiv.innerHTML = html;
+            statusDiv.className = allLoaded ? 'status success' : 'status error';
+            return allLoaded;
+        }
+
+        // 测试绘制
+        function testDrawing() {
+            const canvas = document.getElementById('preview-canvas');
+            const ctx = canvas.getContext('2d');
+            const resultsDiv = document.getElementById('test-results');
+
+            // 清除画布
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            if (!checkEnhancedFunctions()) {
+                resultsDiv.innerHTML = '<div class="status error">请先确保增强绘制函数已加载</div>';
+                return;
+            }
+
+            // 测试绘制5个元件
+            const testComponents = [
+                { type: 'battery', x: 150, y: 100, value: 12 },
+                { type: 'resistor', x: 400, y: 100, value: 100 },
+                { type: 'switch', x: 650, y: 100, value: true },
+                { type: 'ammeter', x: 150, y: 400 },
+                { type: 'voltmeter', x: 400, y: 400 }
+            ];
+
+            // 临时创建组件
+            globalThis.circuitComponents = [];
+            globalThis.circuitSimulator = { isSimulating: true };
+
+            testComponents.forEach(comp => {
+                let component;
+                switch(comp.type) {
+                    case 'battery':
+                        component = new Battery(comp.x, comp.y, comp.value);
+                        break;
+                    case 'resistor':
+                        component = new Resistor(comp.x, comp.y, comp.value);
+                        break;
+                    case 'switch':
+                        component = new Switch(comp.x, comp.y);
+                        break;
+                    case 'ammeter':
+                        component = new Ammeter(comp.x, comp.y);
+                        component.setCurrent(1.5); // 模拟电流
+                        break;
+                    case 'voltmeter':
+                        component = new Voltmeter(comp.x, comp.y);
+                        component.setVoltage(9.0); // 模拟电压
+                        break;
+                }
+                globalThis.circuitComponents.push(component);
+            });
+
+            // 使用增强的网格绘制
+            if (window.drawGridEnhanced) {
+                window.drawGridEnhanced();
+            }
+
+            // 绘制组件
+            globalThis.circuitComponents.forEach(comp => {
+                switch(comp.type) {
+                    case 'battery':
+                        window.drawBatteryEnhanced(comp);
+                        break;
+                    case 'resistor':
+                        window.drawResistorEnhanced(comp);
+                        break;
+                    case 'switch':
+                        window.drawSwitchEnhanced(comp);
+                        break;
+                    case 'ammeter':
+                        window.drawAmmeterEnhanced(comp);
+                        break;
+                    case 'voltmeter':
+                        window.drawVoltmeterEnhanced(comp);
+                        break;
+                }
+            });
+
+            // 添加标签
+            ctx.fillStyle = '#333';
+            ctx.font = '16px Arial';
+            ctx.textAlign = 'center';
+            ctx.fillText('电池(12V)', 150, 60);
+            ctx.fillText('电阻(100Ω)', 400, 60);
+            ctx.fillText('开关(闭合)', 650, 80);
+            ctx.fillText('电流表(1.5A)', 150, 500);
+            ctx.fillText('电压表(9.0V)', 400, 500);
+
+            resultsDiv.innerHTML = '<div class="status success">✅ 元件绘制测试完成！查看Canvas上的效果</div>';
+        }
+
+        // 页面加载时检查
+        window.addEventListener('DOMContentLoaded', function() {
+            setTimeout(checkEnhancedFunctions, 500);
+        });
+    </script>
+</body>
+</html>
