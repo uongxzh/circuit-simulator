@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>电路实验互动模拟器</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+    <div id="app">
+        <header>
+            <h1>🔬 电路实验互动模拟器</h1>
+            <p class="subtitle">基于欧姆定律的电路设计与分析工具</p>
+        </header>
+
+        <div class="main-container">
+            <!-- 左侧：元件库 -->
+            <aside class="components-panel">
+                <h2>元件库</h2>
+                <div class="component-list">
+                    <div class="component-item" data-type="battery" draggable="true">
+                        <div class="component-icon battery-icon"></div>
+                        <span>电池</span>
+                    </div>
+                    <div class="component-item" data-type="resistor" draggable="true">
+                        <div class="component-icon resistor-icon"></div>
+                        <span>电阻</span>
+                    </div>
+                    <div class="component-item" data-type="switch" draggable="true">
+                        <div class="component-icon switch-icon"></div>
+                        <span>开关</span>
+                    </div>
+                    <div class="component-item" data-type="ammeter" draggable="true">
+                        <div class="component-icon ammeter-icon"></div>
+                        <span>电流表</span>
+                    </div>
+                    <div class="component-item" data-type="voltmeter" draggable="true">
+                        <div class="component-icon voltmeter-icon"></div>
+                        <span>电压表</span>
+                    </div>
+                </div>
+            </aside>
+
+            <!-- 中间：工作区 -->
+            <main class="workspace">
+                <h2>工作区</h2>
+                <canvas id="circuit-canvas" width="800" height="600"></canvas>
+                <div class="workspace-controls">
+                    <button id="clear-btn">清空工作区</button>
+                    <button id="simulate-btn">开始模拟</button>
+                    <button id="stop-btn">停止模拟</button>
+                </div>
+            </main>
+
+            <!-- 右侧：属性面板 -->
+            <aside class="properties-panel">
+                <h2>属性面板</h2>
+                <div id="properties-content">
+                    <p>请选择一个元件查看属性</p>
+                </div>
+            </aside>
+        </div>
+
+        <!-- 底部：状态栏 -->
+        <footer class="status-bar">
+            <div class="status-info">
+                <span id="connection-status">未连接</span>
+                <span id="selected-component">未选择元件</span>
+            </div>
+            <div class="measurements">
+                <span>总电流: <span id="total-current">0.00</span> A</span>
+                <span>总电压: <span id="total-voltage">0.00</span> V</span>
+            </div>
+        </footer>
+    </div>
+
+    <script src="js/components.js"></script>
+    <script src="js/simulator.js"></script>
+    <script src="js/ui.js"></script>
+</body>
+</html>
