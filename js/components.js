@@ -14,9 +14,10 @@ globalThis.nextComponentId = 1;
  * 坐标点类
  */
 class Point {
-    constructor(x, y) {
+    constructor(x, y, index = 0) {
         this.x = x;
         this.y = y;
+        this.index = index; // 添加端点索引，0=上, 1=下
     }
 
     distanceTo(other) {
@@ -60,11 +61,26 @@ class Component {
      * 获取元件上的连接点
      */
     getConnectionPoints() {
-        // 默认返回元件的两个端点
+        // 默认返回元件的两个端点，index0=上, index1=下
         return [
-            new Point(this.x, this.y - 30),
-            new Point(this.x, this.y + 30)
+            new Point(this.x, this.y - 30, 0), // 上端点
+            new Point(this.x, this.y + 30, 1)  // 下端点
         ];
+    }
+
+    /**
+     * 根据索引获取特定的连接点
+     * @param {number} index - 端点索引 (0=上, 1=下)
+     * @returns {Point} 对应的连接点
+     */
+    getConnectionPoint(index) {
+        if (index === 0) {
+            return new Point(this.x, this.y - 30, 0);
+        } else if (index === 1) {
+            return new Point(this.x, this.y + 30, 1);
+        }
+        // 默认返回上端点
+        return new Point(this.x, this.y - 30, 0);
     }
 
     /**
@@ -246,12 +262,22 @@ class Voltmeter extends Component {
  * 连接类
  */
 class Connection {
-    constructor(fromId, toId, fromPoint, toPoint) {
+    constructor(fromId, toId, fromPoint, toPoint, fromPointIndex = null, toPointIndex = null) {
         this.id = `${fromId}-${toId}`;
         this.fromComponentId = fromId;
         this.toComponentId = toId;
         this.fromPoint = fromPoint; // 起始点坐标
         this.toPoint = toPoint; // 终点坐标
+        this.fromPointIndex = fromPointIndex; // 起始端点索引 (0=上, 1=下)
+        this.toPointIndex = toPointIndex; // 目标端点索引 (0=上, 1=下)
+
+        // 如果没有提供端点索引但是 Point 对象有 index 属性，则使用该属性
+        if (this.fromPointIndex === null && fromPoint && fromPoint.index !== undefined) {
+            this.fromPointIndex = fromPoint.index;
+        }
+        if (this.toPointIndex === null && toPoint && toPoint.index !== undefined) {
+            this.toPointIndex = toPoint.index;
+        }
     }
 
     /**
