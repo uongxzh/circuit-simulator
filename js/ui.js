@@ -1267,5 +1267,76 @@ function drawComponentReadings(component) {
     }
 }
 
+/**
+ * 组件拖拽开始
+ */
+function onComponentDragStart(e) {
+    const componentType = e.target.closest('.component-item').dataset.type;
+    e.dataTransfer.setData('componentType', componentType);
+    e.dataTransfer.effectAllowed = 'copy';
+    console.log('开始拖拽组件:', componentType);
+}
+
+/**
+ * 画布拖拽悬停
+ */
+function onCanvasDragOver(e) {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = 'copy';
+}
+
+/**
+ * 画布放置组件
+ */
+function onCanvasDrop(e) {
+    e.preventDefault();
+    
+    const componentType = e.dataTransfer.getData('componentType');
+    if (!componentType) {
+        console.error('未找到组件类型');
+        return;
+    }
+    
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    try {
+        // 使用 ComponentFactory 创建组件
+        const component = globalThis.ComponentFactory.createComponent(componentType, x, y);
+        
+        // 添加到全局组件数组
+        globalThis.circuitComponents.push(component);
+        
+        // 如果有撤销/重做系统，记录操作
+        if (globalThis.commandHistory) {
+            globalThis.commandHistory.execute({
+                type: 'addComponent',
+                component: component,
+                undo: () => {
+                    const index = globalThis.circuitComponents.indexOf(component);
+                    if (index > -1) {
+                        globalThis.circuitComponents.splice(index, 1);
+                    }
+                },
+                redo: () => {
+                    globalThis.circuitComponents.push(component);
+                }
+            });
+            updateHistoryButtons();
+        }
+        
+        // 重新同步组件到模拟器
+        syncComponentsToSimulator();
+        
+        // 重绘画布
+        redrawCanvas();
+        
+        console.log('组件已放置:', componentType, 'at', x, y);
+    } catch (error) {
+        console.error('创建组件失败:', error);
+    }
+}
+
 // 等待DOM加载完成
 document.addEventListener('DOMContentLoaded', initializeUI);
