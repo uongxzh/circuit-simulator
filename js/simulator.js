@@ -233,7 +233,9 @@ class CircuitSimulator {
             }
 
             if (neighborId === startId && depth > 1) {
-                if (currentResistance < 0.1) {
+                // 短路检测：电阻低于1欧姆认为是可能的短路
+                // 与上面的检测保持一致（都是 < 1）
+                if (currentResistance < 1) {
                     return true; // 低阻回路，可能是短路
                 }
             }
@@ -340,6 +342,8 @@ class CircuitSimulator {
         const resistors = circuit.filter(c => c.type === 'resistor');
         const switches = circuit.filter(c => c.type === 'switch' && !c.isOpen());
         const ammeters = circuit.filter(c => c.type === 'ammeter');
+        // 电压表是测量仪器，不参与电路等效电阻计算
+        const voltmeters = circuit.filter(c => c.type === 'voltmeter');
 
         // 判断是串联还是并联
         // 在串联电路中，所有元件在同一路径上
@@ -355,6 +359,7 @@ class CircuitSimulator {
             resistors: resistors,
             switches: switches,
             ammeters: ammeters,
+            voltmeters: voltmeters, // 电压表单独记录
             isParallel: pathCount > 1,
             nodeConnections: nodeConnections,
             parallelPaths: pathCount
@@ -399,29 +404,56 @@ class CircuitSimulator {
      * 计算等效电阻
      */
     calculateEquivalentResistance(analysis) {
+        // 分离串联电阻和并联电阻
+        // 串联元件：按顺序累加电阻
+        // 并联元件：使用 1/Rp = 1/R1 + 1/R2 + ... 公式
+
+        // 收集所有电阻值用于并联计算
+        const allResistances = [];
+
+        // 电阻（可能是串联或并联）
+        for (const resistor of analysis.resistors) {
+            allResistances.push(resistor.getResistance());
+        }
+
+        // 开关闭合时的电阻（串联）
+        for (const sw of analysis.switches) {
+            allResistances.push(sw.getResistance());
+        }
+
+        // 电流表内阻（串联）
+        for (const ammeter of analysis.ammeters) {
+            allResistances.push(ammeter.getResistance());
+        }
+
+        // 电压表内阻很大（并联测量），不计入总电阻
+        // 电压表是测量仪器，应该被排除在电路等效电阻计算之外
+
         let totalResistance = 0;
 
-        // 电阻
-        for (const resistor of analysis.resistors) {
-            totalResistance += resistor.getResistance();
-        }
-
-        // 开关闭合时的电阻
-        for (const sw of analysis.switches) {
-            totalResistance += sw.getResistance();
-        }
-
-        // 电流表内阻
-        for (const ammeter of analysis.ammeters) {
-            totalResistance += ammeter.getResistance();
-        }
-
-        // 如果是并联，需要考虑并联电阻公式
         if (analysis.isParallel && analysis.resistors.length > 1) {
-            // 简化的并联计算（假设所有分支合并）
+            // 并联电路：先计算并联部分的等效电阻
             const parallelResistance = this.calculateParallelResistance(analysis.resistors);
-            if (parallelResistance > 0) {
-                totalResistance = parallelResistance;
+            
+            // 并联等效电阻 + 串联元件电阻
+            totalResistance = parallelResistance;
+            
+            // 串联元件（开关、电流表）应该加到并联等效电阻上
+            // 但这些元件通常与并联部分串联
+            for (const sw of analysis.switches) {
+                if (sw.getResistance() > 0 && sw.getResistance() !== Infinity) {
+                    totalResistance += sw.getResistance();
+                }
+            }
+            for (const ammeter of analysis.ammeters) {
+                totalResistance += ammeter.getResistance();
+            }
+        } else {
+            // 串联电路：所有电阻直接相加
+            for (const r of allResistances) {
+                if (r > 0 && r !== Infinity) {
+                    totalResistance += r;
+                }
             }
         }
 
@@ -474,19 +506,41 @@ class CircuitSimulator {
      * 串联电路分配
      */
     distributeSeriesCircuit(analysis, totalCurrent, totalVoltage) {
-        // 所有元件电流相同
+        // 计算串联电路的总电阻
+        let totalResistance = 0;
+        const seriesComponents = [];
+
+        // 收集所有串联元件及其电阻
         for (const resistor of analysis.resistors) {
-            resistor.setCurrent(totalCurrent);
-            const voltageDrop = totalCurrent * resistor.getResistance();
-            resistor.setVoltage(voltageDrop);
+            seriesComponents.push({ component: resistor, resistance: resistor.getResistance() });
+            totalResistance += resistor.getResistance();
         }
 
         for (const ammeter of analysis.ammeters) {
-            ammeter.setCurrent(totalCurrent);
+            seriesComponents.push({ component: ammeter, resistance: ammeter.getResistance() });
+            totalResistance += ammeter.getResistance();
         }
 
-        // 电压分配
+        // 电池电压用于分压计算
         let remainingVoltage = totalVoltage;
+
+        // 分配电压和电流给所有串联元件
+        for (let i = 0; i < seriesComponents.length; i++) {
+            const { component, resistance } = seriesComponents[i];
+
+            // 所有元件电流相同
+            component.setCurrent(totalCurrent);
+
+            // 电压分配：按电阻比例分压
+            // 最后一个元件获得剩余电压（避免浮点误差）
+            if (i === seriesComponents.length - 1) {
+                component.setVoltage(remainingVoltage);
+            } else {
+                const voltageDrop = totalCurrent * resistance;
+                component.setVoltage(voltageDrop);
+                remainingVoltage -= voltageDrop;
+            }
+        }
     }
 
     /**
@@ -530,18 +584,29 @@ class CircuitSimulator {
     propagateValues() {
         for (const component of this.components) {
             if (component.type === 'voltmeter') {
+                // 查找与电压表并联连接的元件
+                // 电压表应该测量与其直接相连的元件两端的电压
                 const connectedComponents = this.components.filter(c =>
                     component.connections.includes(c.id) || c.connections.includes(component.id)
                 );
 
-                if (connectedComponents.length >= 2) {
-                    let voltage = 0;
-                    // 假定为并联测量
-                    if (connectedComponents[0].type === 'resistor') {
-                        voltage = connectedComponents[0].getVoltage();
+                // 电压表应该测量与其并联的电阻或电池的电压
+                // 由于电压表内阻很大，它不影响被测电路
+                let measuredVoltage = 0;
+
+                for (const connected of connectedComponents) {
+                    if (connected.type === 'resistor') {
+                        // 测量电阻两端的电压
+                        measuredVoltage = connected.getVoltage();
+                        break;
+                    } else if (connected.type === 'battery') {
+                        // 测量电池两端的电压
+                        measuredVoltage = connected.getVoltage();
+                        break;
                     }
-                    component.setVoltage(voltage);
                 }
+
+                component.setVoltage(measuredVoltage);
             }
         }
     }
@@ -588,25 +653,39 @@ class CircuitSimulator {
 
     /**
      * 获取总电流
+     * 简化：总电流 = 总电压 / 总电阻（欧姆定律）
      */
     getTotalCurrent() {
-        let totalCurrent = 0;
+        // 计算总电压
+        let totalVoltage = 0;
         for (const component of this.components) {
             if (component.type === 'battery') {
-                // 假设电源电流
-                const connectedResistors = this.components.filter(c =>
-                    c.type === 'resistor' &&
-                    (component.connections.includes(c.id) || c.connections.includes(component.id))
-                );
-
-                let batteryCurrent = 0;
-                for (const resistor of connectedResistors) {
-                    batteryCurrent += resistor.getCurrent();
-                }
-                totalCurrent = Math.max(totalCurrent, batteryCurrent);
+                totalVoltage += component.getVoltage();
             }
         }
-        return totalCurrent || 0;
+
+        // 计算总电阻
+        let totalResistance = 0;
+        const resistors = this.components.filter(c => c.type === 'resistor');
+        const closedSwitches = this.components.filter(c => c.type === 'switch' && !c.isOpen());
+        const ammeters = this.components.filter(c => c.type === 'ammeter');
+
+        // 简单串联：所有电阻相加
+        for (const resistor of resistors) {
+            totalResistance += resistor.getResistance();
+        }
+        for (const sw of closedSwitches) {
+            totalResistance += sw.getResistance();
+        }
+        for (const ammeter of ammeters) {
+            totalResistance += ammeter.getResistance();
+        }
+
+        // 欧姆定律：I = U / R
+        if (totalResistance > 0) {
+            return totalVoltage / totalResistance;
+        }
+        return 0;
     }
 
     /**
