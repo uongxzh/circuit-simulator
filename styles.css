@@ -202,6 +202,72 @@ header .subtitle {
     background-color: #c0392b;
 }
 
+#undo-btn {
+    background-color: #95a5a6;
+}
+
+#undo-btn:hover:not(:disabled) {
+    background-color: #7f8c8d;
+}
+
+#undo-btn:disabled {
+    background-color: #bdc3c7;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+#redo-btn {
+    background-color: #95a5a6;
+}
+
+#redo-btn:hover:not(:disabled) {
+    background-color: #7f8c8d;
+}
+
+#redo-btn:disabled {
+    background-color: #bdc3c7;
+    cursor: not-allowed;
+    opacity: 0.5;
+}
+
+#save-btn {
+    background-color: var(--success-color);
+}
+
+#save-btn:hover {
+    background-color: #229954;
+}
+
+#load-btn {
+    background-color: #9b59b6;
+}
+
+#load-btn:hover {
+    background-color: #8e44ad;
+}
+
+/* 选中导线高亮样式 */
+.selected-wire {
+    stroke: #ff0000 !important;
+    stroke-width: 4 !important;
+    filter: drop-shadow(0 0 3px rgba(255, 0, 0, 0.5));
+}
+
+/* 当前不可用的按钮样式 */
+button:disabled {
+    background-color: #95a5a6 !important;
+    cursor: not-allowed !important;
+    opacity: 0.5;
+}
+
+/* 更微小的按钮样式（适合更多按钮） */
+@media (max-width: 768px) {
+    .workspace-controls button {
+        padding: 0.5rem 1rem;
+        font-size: 0.9rem;
+    }
+}
+
 /* 属性面板 */
 .properties-panel {
     font-size: 0.9rem;

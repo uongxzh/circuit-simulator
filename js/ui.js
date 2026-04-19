@@ -9,6 +9,7 @@ console.log('✅ ui.js 加载成功！');
 let canvas = null;
 let ctx = null;
 let selectedComponent = null;
+let selectedWire = null; // 选中的导线
 let draggedComponent = null;
 let isConnecting = false;
 let connectionStart = null;
@@ -16,6 +17,8 @@ let isDragging = false;
 let mouseOffset = { x: 0, y: 0 };
 let tempConnection = null; // 临时连线预览
 let connectionPoints = []; // 所有连接点
+let dragStartPos = null; // 用于判断拖拽距离
+let mousePos = { x: 0, y: 0 }; // 当前鼠标位置
 
 /**
  * 初始化函数
@@ -64,12 +67,82 @@ function bindEventListeners() {
     if (stopBtn) {
         stopBtn.addEventListener('click', stopSimulation);
     }
+    
+    // 撤销按钮
+    const undoBtn = document.getElementById('undo-btn');
+    if (undoBtn) {
+        undoBtn.addEventListener('click', () => {
+            if (globalThis.commandHistory && globalThis.commandHistory.undo()) {
+                updateHistoryButtons();
+                redrawCanvas();
+                updateStatusBar();
+            }
+        });
+    }
+    
+    // 重做按钮
+    const redoBtn = document.getElementById('redo-btn');
+    if (redoBtn) {
+        redoBtn.addEventListener('click', () => {
+            if (globalThis.commandHistory && globalThis.commandHistory.redo()) {
+                updateHistoryButtons();
+                redrawCanvas();
+                updateStatusBar();
+            }
+        });
+    }
+    
+    // 保存按钮
+    const saveBtn = document.getElementById('save-btn');
+    if (saveBtn) {
+        saveBtn.addEventListener('click', () => {
+            try {
+                const timestamp = new Date().toISOString().slice(0, 19).replace(/:/g, '-');
+                const filename = `circuit_${timestamp}.json`;
+                globalThis.circuitStorage.saveCircuit(filename);
+            } catch (error) {
+                console.error('保存失败:', error);
+                alert('保存电路失败: ' + error.message);
+            }
+        });
+    }
+    
+    // 加载按钮
+    const loadBtn = document.getElementById('load-btn');
+    const loadFileInput = document.getElementById('load-file-input');
+    if (loadBtn && loadFileInput) {
+        loadBtn.addEventListener('click', () => {
+            loadFileInput.click();
+        });
+        
+        loadFileInput.addEventListener('change', async (e) => {
+            const file = e.target.files[0];
+            if (file) {
+                try {
+                    await globalThis.circuitStorage.loadCircuit(file);
+                    updateHistoryButtons();
+                    redrawCanvas();
+                    updateStatusBar();
+                    alert('电路已成功加载');
+                } catch (error) {
+                    console.error('加载失败:', error);
+                    alert('加载电路失败: ' + error.message);
+                }
+                
+                // 清除input的值，以便可以重复选择同名文件
+                e.target.value = '';
+            }
+        });
+    }
 
     // Canvas事件
     canvas.addEventListener('mousedown', onCanvasMouseDown);
     canvas.addEventListener('mousemove', onCanvasMouseMove);
     canvas.addEventListener('mouseup', onCanvasMouseUp);
     canvas.addEventListener('click', onCanvasClick);
+    
+    // 键盘事件
+    document.addEventListener('keydown', onKeyDown);
 
     // 拖拽事件
     const componentItems = document.querySelectorAll('.component-item');
@@ -79,6 +152,22 @@ function bindEventListeners() {
 
     canvas.addEventListener('dragover', onCanvasDragOver);
     canvas.addEventListener('drop', onCanvasDrop);
+}
+
+/**
+ * 更新撤销/重做按钮状态
+ */
+function updateHistoryButtons() {
+    const undoBtn = document.getElementById('undo-btn');
+    const redoBtn = document.getElementById('redo-btn');
+    
+    if (undoBtn && globalThis.commandHistory) {
+        undoBtn.disabled = !globalThis.commandHistory.canUndo();
+    }
+    
+    if (redoBtn && globalThis.commandHistory) {
+        redoBtn.disabled = !globalThis.commandHistory.canRedo();
+    }
 }
 
 /**
@@ -104,13 +193,74 @@ function clearWorkspace() {
 
         syncComponentsToSimulator();
         selectedComponent = null;
+        selectedWire = null;
         connectionStart = null;
         isConnecting = false;
 
         updateStatusBar();
         redrawCanvas();
+        updateHistoryButtons();
 
         console.log('工作区已清空');
+    }
+}
+
+/**
+ * 键盘事件处理
+ */
+function onKeyDown(event) {
+    const key = event.key;
+    const ctrlOrCmd = event.ctrlKey || event.metaKey;
+    
+    switch (key) {
+        case 'Delete':
+            event.preventDefault();
+            deleteSelected();
+            break;
+            
+        case 'z':
+            if (ctrlOrCmd) {
+                event.preventDefault();
+                if (globalThis.commandHistory && globalThis.commandHistory.undo()) {
+                    updateHistoryButtons();
+                    redrawCanvas();
+                    updateStatusBar();
+                }
+            }
+            break;
+            
+        case 'y':
+            if (ctrlOrCmd) {
+                event.preventDefault();
+                if (globalThis.commandHistory && globalThis.commandHistory.redo()) {
+                    updateHistoryButtons();
+                    redrawCanvas();
+                    updateStatusBar();
+                }
+            }
+            break;
+    }
+}
+
+/**
+ * 删除选中的组件或导线
+ */
+function deleteSelected() {
+    if (selectedComponent) {
+        const command = CommandFactory.createCommand(CommandType.REMOVE_COMPONENT, selectedComponent);
+        globalThis.commandHistory.execute(command);
+        selectedComponent = null;
+        clearPropertiesPanel();
+        updateHistoryButtons();
+        redrawCanvas();
+        updateStatusBar();
+    } else if (selectedWire) {
+        const command = CommandFactory.createCommand(CommandType.DISCONNECT, selectedWire);
+        globalThis.commandHistory.execute(command);
+        selectedWire = null;
+        updateHistoryButtons();
+        redrawCanvas();
+        updateStatusBar();
     }
 }
 
@@ -199,6 +349,10 @@ function onCanvasMouseDown(event) {
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
     const point = new Point(x, y);
+    
+    // 记录拖拽起始位置
+    dragStartPos = { x: x, y: y };
+    mousePos = { x: x, y: y };
 
     // 检查是否点击在连接点上
     const connectionPoint = findConnectionPointAt(point);
@@ -233,6 +387,7 @@ function onCanvasMouseDown(event) {
         } else {
             // 普通拖拽
             selectedComponent = component;
+            selectedWire = null; // 取消导线选择
             isDragging = true;
             mouseOffset.x = x - component.x;
             mouseOffset.y = y - component.y;
@@ -241,9 +396,18 @@ function onCanvasMouseDown(event) {
             showComponentProperties(component);
         }
     } else {
-        // 点击空白区域
-        selectedComponent = null;
-        isDragging = false;
+        // 点击空白区域，检查是否是点击导线
+        const wire = findWireAt(point);
+        if (wire) {
+            selectedWire = wire;
+            selectedComponent = null; // 取消组件选择
+            clearPropertiesPanel();
+        } else {
+            // 点击空白区域
+            selectedComponent = null;
+            selectedWire = null;
+            clearPropertiesPanel();
+        }
         
         // 如果正在连接，点击空白处取消连接
         if (isConnecting) {
@@ -252,7 +416,7 @@ function onCanvasMouseDown(event) {
             tempConnection = null;
         }
         
-        clearPropertiesPanel();
+        isDragging = false;
     }
 
     redrawCanvas();
@@ -265,6 +429,8 @@ function onCanvasMouseMove(event) {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    
+    mousePos = { x: x, y: y }; // 更新当前鼠标位置
 
     if (isDragging && selectedComponent) {
         // 拖拽组件
@@ -298,7 +464,36 @@ function onCanvasMouseMove(event) {
  * Canvas鼠标释放
  */
 function onCanvasMouseUp(event) {
+    const rect = canvas.getBoundingClientRect();
+    const x = event.clientX - rect.left;
+    const y = event.clientY - rect.top;
+    
+    // 记录组件移动到历史
+    if (isDragging && selectedComponent && dragStartPos) {
+        const dragDistance = Math.sqrt((x - dragStartPos.x) ** 2 + (y - dragStartPos.y) ** 2);
+        if (dragDistance > 5) { // 只记录真正的拖拽
+            const oldX = dragStartPos.x - mouseOffset.x;
+            const oldY = dragStartPos.y - mouseOffset.y;
+            const newX = selectedComponent.x;
+            const newY = selectedComponent.y;
+            
+            if (globalThis.commandHistory && (oldX !== newX || oldY !== newY)) {
+                const command = CommandFactory.createCommand(
+                    CommandType.MOVE_COMPONENT, 
+                    selectedComponent, 
+                    oldX, 
+                    oldY, 
+                    newX, 
+                    newY
+                );
+                globalThis.commandHistory.execute(command);
+                updateHistoryButtons();
+            }
+        }
+    }
+    
     isDragging = false;
+    dragStartPos = null;
     
     // 如果正在连接但没有完成，取消连接
     if (isConnecting && !tempConnection) {
@@ -315,6 +510,16 @@ function onCanvasClick(event) {
     const rect = canvas.getBoundingClientRect();
     const x = event.clientX - rect.left;
     const y = event.clientY - rect.top;
+    
+    // 检查拖拽距离，如果移动超过5像素，则不触发点击
+    if (dragStartPos) {
+        const dragDistance = Math.sqrt((x - dragStartPos.x) ** 2 + (y - dragStartPos.y) ** 2);
+        if (dragDistance > 5) {
+            dragStartPos = null;
+            return; // 拖拽过程中不触发点击
+        }
+        dragStartPos = null;
+    }
 
     const point = new Point(x, y);
 
@@ -323,10 +528,12 @@ function onCanvasClick(event) {
     if (component) {
         // 切换开关
         if (component.type === 'switch') {
-            const state = component.toggle();
+            const command = CommandFactory.createCommand(CommandType.TOGGLE_SWITCH, component);
+            globalThis.commandHistory.execute(command);
             updateStatusBar();
             redrawCanvas();
-            console.log(`开关 ${component.id} 状态: ${state ? '闭合' : '断开'}`);
+            updateHistoryButtons();
+            console.log(`开关 ${component.id} 状态: ${component.isOpen() ? '闭合' : '断开'}`);
         }
     }
 }
@@ -363,13 +570,28 @@ function onCanvasDrop(event) {
     try {
         // 创建组件
         const component = ComponentFactory.createComponent(componentType, x, y);
-        globalThis.circuitComponents.push(component);
+        
+        // 使用历史记录
+        if (globalThis.commandHistory) {
+            const command = CommandFactory.createCommand(CommandType.ADD_COMPONENT, {
+                id: component.id,
+                type: componentType,
+                x: x,
+                y: y,
+                properties: component.properties || {}
+            });
+            globalThis.commandHistory.execute(command);
+        } else {
+            // 备份方式，如果历史记录未初始化
+            globalThis.circuitComponents.push(component);
+        }
 
         console.log(`添加 ${componentType} 在 (${x}, ${y})`);
 
         // 重新绘制
         redrawCanvas();
         updateStatusBar();
+        updateHistoryButtons();
     } catch (error) {
         console.error('创建组件失败:', error);
         alert('创建组件失败: ' + error.message);
@@ -408,6 +630,66 @@ function findConnectionPointAt(point) {
 }
 
 /**
+ * 查找导线
+ */
+function findWireAt(point) {
+    const threshold = 10; // 导线检测距离阈值
+    
+    for (const connection of globalThis.connections) {
+        const fromComponent = globalThis.circuitComponents.find(c => c.id === connection.fromComponentId);
+        const toComponent = globalThis.circuitComponents.find(c => c.id === connection.toComponentId);
+        
+        if (fromComponent && toComponent) {
+            const fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
+            const toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
+            
+            // 计算点到线段的距离
+            const distance = pointToLineDistance(point, fromPoint, toPoint);
+            if (distance < threshold) {
+                return connection;
+            }
+        }
+    }
+    return null;
+}
+
+/**
+ * 计算点到线段的距离
+ */
+function pointToLineDistance(point, lineStart, lineEnd) {
+    const A = point.x - lineStart.x;
+    const B = point.y - lineStart.y;
+    const C = lineEnd.x - lineStart.x;
+    const D = lineEnd.y - lineStart.y;
+    
+    const dot = A * C + B * D;
+    const lenSq = C * C + D * D;
+    let param = -1;
+    
+    if (lenSq !== 0) {
+        param = dot / lenSq;
+    }
+    
+    let xx, yy;
+    
+    if (param < 0) {
+        xx = lineStart.x;
+        yy = lineStart.y;
+    } else if (param > 1) {
+        xx = lineEnd.x;
+        yy = lineEnd.y;
+    } else {
+        xx = lineStart.x + param * C;
+        yy = lineStart.y + param * D;
+    }
+    
+    const dx = point.x - xx;
+    const dy = point.y - yy;
+    
+    return Math.sqrt(dx * dx + dy * dy);
+}
+
+/**
  * 完成连接
  */
 function completeConnection(start, end) {
@@ -432,14 +714,22 @@ function completeConnection(start, end) {
         end.point
     );
     
-    globalThis.connections.push(connection);
-    
-    // 更新组件的连接列表
-    start.component.addConnection(end.component);
-    end.component.addConnection(start.component);
+    // 使用历史记录
+    if (globalThis.commandHistory) {
+        const command = CommandFactory.createCommand(CommandType.CONNECT, connection);
+        globalThis.commandHistory.execute(command);
+    } else {
+        // 备份方式，如果历史记录未初始化
+        globalThis.connections.push(connection);
+        
+        // 更新组件的连接列表
+        start.component.addConnection(end.component);
+        end.component.addConnection(start.component);
+    }
     
     console.log('完成连接:', connection.id);
     updateStatusBar();
+    updateHistoryButtons();
 }
 
 /**
@@ -502,9 +792,44 @@ function updateBatteryProperties(componentId) {
 
     const voltageInput = document.getElementById('prop-voltage');
     const internalRInput = document.getElementById('prop-internalR');
+    
+    const oldVoltage = component.getVoltage();
+    const oldInternalR = component.getInternalResistance();
+    const newVoltage = parseFloat(voltageInput.value);
+    const newInternalR = parseFloat(internalRInput.value);
 
-    component.setVoltage(parseFloat(voltageInput.value));
-    component.setInternalResistance(parseFloat(internalRInput.value));
+    // 使用历史记录
+    if (globalThis.commandHistory) {
+        // 更新电压属性
+        if (oldVoltage !== newVoltage) {
+            const voltageCommand = CommandFactory.createCommand(
+                CommandType.UPDATE_PROPERTY, 
+                component, 
+                'voltage', 
+                oldVoltage, 
+                newVoltage
+            );
+            globalThis.commandHistory.execute(voltageCommand);
+        }
+        
+        // 更新内阻属性
+        if (oldInternalR !== newInternalR) {
+            const internalRCommand = CommandFactory.createCommand(
+                CommandType.UPDATE_PROPERTY, 
+                component, 
+                'internalResistance', 
+                oldInternalR, 
+                newInternalR
+            );
+            globalThis.commandHistory.execute(internalRCommand);
+        }
+        
+        updateHistoryButtons();
+    } else {
+        // 备份方式
+        component.setVoltage(newVoltage);
+        component.setInternalResistance(newInternalR);
+    }
 
     console.log('电池属性已更新');
 }
@@ -517,7 +842,24 @@ function updateResistorProperties(componentId) {
     if (!component || component.type !== 'resistor') return;
 
     const resistanceInput = document.getElementById('prop-resistance');
-    component.setResistance(parseFloat(resistanceInput.value));
+    const oldResistance = component.getResistance();
+    const newResistance = parseFloat(resistanceInput.value);
+
+    // 使用历史记录
+    if (globalThis.commandHistory) {
+        const command = CommandFactory.createCommand(
+            CommandType.UPDATE_PROPERTY, 
+            component, 
+            'resistance', 
+            oldResistance, 
+            newResistance
+        );
+        globalThis.commandHistory.execute(command);
+        updateHistoryButtons();
+    } else {
+        // 备份方式
+        component.setResistance(newResistance);
+    }
 
     console.log('电阻属性已更新');
 }
@@ -630,14 +972,20 @@ function drawGrid() {
  */
 function drawConnections() {
     // 绘制已完成的连接（黑色实线）
-    ctx.strokeStyle = '#000000';
-    ctx.lineWidth = 2;
-
     for (const connection of globalThis.connections) {
         const fromComponent = globalThis.circuitComponents.find(c => c.id === connection.fromComponentId);
         const toComponent = globalThis.circuitComponents.find(c => c.id === connection.toComponentId);
-
+        
         if (fromComponent && toComponent) {
+            // 设置样式，选中的导线使用红色高亮
+            if (selectedWire && selectedWire.id === connection.id) {
+                ctx.strokeStyle = '#ff0000';
+                ctx.lineWidth = 4;
+            } else {
+                ctx.strokeStyle = '#000000';
+                ctx.lineWidth = 2;
+            }
+
             // 计算连接点
             const fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
             const toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));

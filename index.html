@@ -46,9 +46,14 @@
                 <h2>工作区</h2>
                 <canvas id="circuit-canvas" width="800" height="600"></canvas>
                 <div class="workspace-controls">
+                    <button id="undo-btn" disabled>撤销</button>
+                    <button id="redo-btn" disabled>重做</button>
                     <button id="clear-btn">清空工作区</button>
                     <button id="simulate-btn">开始模拟</button>
                     <button id="stop-btn">停止模拟</button>
+                    <button id="save-btn">保存电路</button>
+                    <button id="load-btn">加载电路</button>
+                    <input type="file" id="load-file-input" accept=".json" style="display: none;">
                 </div>
             </main>
 
@@ -77,6 +82,8 @@
     <!-- 核心模块 -->
     <script src="js/components.js"></script>
     <script src="js/simulator.js"></script>
+    <script src="js/history.js"></script>
+    <script src="js/storage.js"></script>
     <script src="js/ui.js"></script>
 </body>
 </html>
