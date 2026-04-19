@@ -302,7 +302,7 @@ class Connection {
 
 /**
  * 元件工厂
-// 元件工厂
+ */
 class ComponentFactory {
     static createComponent(type, x, y, properties = {}) {
         switch (type) {
