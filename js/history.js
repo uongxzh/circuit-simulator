@@ -48,7 +48,7 @@ class AddComponentCommand extends Command {
             this.data.type,
             this.data.x,
             this.data.y,
-            this.data.id
+            this.data.properties
         );
         
         // 恢复属性
