@@ -302,7 +302,7 @@ class Connection {
 
 /**
  * 元件工厂
- */
+// 元件工厂
 class ComponentFactory {
     static createComponent(type, x, y, properties = {}) {
         switch (type) {
@@ -325,6 +325,9 @@ class ComponentFactory {
         }
     }
 }
+
+// 导出到全局对象
+globalThis.ComponentFactory = ComponentFactory;
 
 /**
  * 根据ID查找元件
