@@ -640,8 +640,18 @@ function findWireAt(point) {
         const toComponent = globalThis.circuitComponents.find(c => c.id === connection.toComponentId);
         
         if (fromComponent && toComponent) {
-            const fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
-            const toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
+            // 使用存储的端点索引获取实际端点位置
+            let fromPoint, toPoint;
+            if (connection.fromPointIndex !== null && connection.fromPointIndex !== undefined) {
+                fromPoint = fromComponent.getConnectionPoint(connection.fromPointIndex);
+            } else {
+                fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
+            }
+            if (connection.toPointIndex !== null && connection.toPointIndex !== undefined) {
+                toPoint = toComponent.getConnectionPoint(connection.toPointIndex);
+            } else {
+                toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
+            }
             
             // 计算点到线段的距离
             const distance = pointToLineDistance(point, fromPoint, toPoint);
@@ -707,11 +717,17 @@ function completeConnection(start, end) {
         return;
     }
 
+    // 确保传递端点索引
+    const fromPointIndex = start.point && start.point.index !== undefined ? start.point.index : null;
+    const toPointIndex = end.point && end.point.index !== undefined ? end.point.index : null;
+    
     const connection = new Connection(
         start.component.id,
         end.component.id,
         start.point,
-        end.point
+        end.point,
+        fromPointIndex,
+        toPointIndex
     );
     
     // 使用历史记录
@@ -986,9 +1002,18 @@ function drawConnections() {
                 ctx.lineWidth = 2;
             }
 
-            // 计算连接点
-            const fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
-            const toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
+            // 计算连接点 - 使用存储的端点索引获取实际端点位置
+            let fromPoint, toPoint;
+            if (connection.fromPointIndex !== null && connection.fromPointIndex !== undefined) {
+                fromPoint = fromComponent.getConnectionPoint(connection.fromPointIndex);
+            } else {
+                fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
+            }
+            if (connection.toPointIndex !== null && connection.toPointIndex !== undefined) {
+                toPoint = toComponent.getConnectionPoint(connection.toPointIndex);
+            } else {
+                toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
+            }
 
             ctx.beginPath();
             ctx.moveTo(fromPoint.x, fromPoint.y);
