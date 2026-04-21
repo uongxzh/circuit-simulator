@@ -188,7 +188,7 @@ class CircuitSimulator {
 
         for (const battery of batteries) {
             const visited = new Set();
-            if (this.detectShortCircuitDFS(graph, battery.id, battery.id, visited, 0, 0)) {
+            if (this.detectShortCircuitDFS(graph, battery.id, battery.id, visited, 0, 0, false)) {
                 throw new Error('警告: 检测到可能的短路！');
             }
         }
@@ -196,14 +196,18 @@ class CircuitSimulator {
 
     /**
      * 短路检测DFS
+     * @param {boolean} hasResistor - 路径上是否已经有电阻元件
      */
-    detectShortCircuitDFS(graph, startId, currentId, visited, resistance, depth) {
+    detectShortCircuitDFS(graph, startId, currentId, visited, resistance, depth, hasResistor) {
         if (depth > 50) return false;
-        if (visited.has(currentId) && !(currentId === startId && depth > 1)) return false;
+        if (visited.has(currentId) && !(currentId === startId && depth >= 1)) return false;
 
         visited.add(currentId);
         const currentNode = graph.get(currentId);
         const component = currentNode.component;
+
+        // 更新路径上是否有电阻
+        const nowHasResistor = hasResistor || component.type === 'resistor' || component.type === 'ammeter' || component.type === 'voltmeter';
 
         // 累加电阻
         let currentResistance = resistance;
@@ -217,8 +221,9 @@ class CircuitSimulator {
             // 电源不参与电阻计算
         }
 
-        // 如果电阻极低且回到起点，可能是短路
-        if (currentId === startId && depth > 1 && currentResistance < 0.01) {
+        // 如果电阻极低且回到起点，并且路径上没有负载元件，可能是短路
+        // depth >= 2 确保路径至少包含两个非电源元件
+        if (currentId === startId && depth >= 2 && !nowHasResistor && currentResistance <= 0.5) {
             return true;
         }
 
@@ -232,15 +237,15 @@ class CircuitSimulator {
                 continue;
             }
 
-            if (neighborId === startId && depth > 1) {
-                // 短路检测：电阻低于0.01欧姆认为是可能的短路
-                if (currentResistance < 0.01) {
+            if (neighborId === startId && depth >= 2) {
+                // 短路检测：路径上没有负载元件且电阻低于0.5欧姆
+                if (!nowHasResistor && currentResistance <= 0.5) {
                     return true; // 低阻回路，可能是短路
                 }
             }
 
             if (!visited.has(neighborId)) {
-                if (this.detectShortCircuitDFS(graph, startId, neighborId, new Set(visited), currentResistance, depth + 1)) {
+                if (this.detectShortCircuitDFS(graph, startId, neighborId, new Set(visited), currentResistance, depth + 1, nowHasResistor)) {
                     return true;
                 }
             }
@@ -565,9 +570,20 @@ class CircuitSimulator {
 
         // 电流表读数
         for (const ammeter of analysis.ammeters) {
-            // 简化的电流表读数：假设与电阻并联，计算通过电流表的电流
-            const current = totalVoltage / ammeter.getResistance();
-            ammeter.setCurrent(current);
+            // 查找与电流表直接相连的电阻，显示该支路电流
+            const connectedResistors = analysis.resistors.filter(r =>
+                ammeter.connections.includes(r.id) || r.connections.includes(ammeter.id)
+            );
+            if (connectedResistors.length > 0) {
+                ammeter.setCurrent(connectedResistors[0].getCurrent());
+            } else {
+                // 如果没有直接相连的电阻，显示所有支路电流之和
+                let totalCurrent = 0;
+                for (const r of analysis.resistors) {
+                    totalCurrent += r.getCurrent();
+                }
+                ammeter.setCurrent(totalCurrent);
+            }
         }
     }
 
@@ -674,13 +690,27 @@ class CircuitSimulator {
             }
         }
 
-        // 计算总电阻
+        if (totalVoltage === 0 || this.components.length === 0) {
+            return 0;
+        }
+
+        // 尝试通过拓扑分析计算等效电阻
+        try {
+            const analysis = this.analyzeTopology(this.components);
+            const totalResistance = this.calculateEquivalentResistance(analysis);
+            if (totalResistance > 0 && isFinite(totalResistance)) {
+                return totalVoltage / totalResistance;
+            }
+        } catch (e) {
+            // 拓扑分析失败时回退到简单相加
+        }
+
+        // 回退：简单串联计算
         let totalResistance = 0;
         const resistors = this.components.filter(c => c.type === 'resistor');
         const closedSwitches = this.components.filter(c => c.type === 'switch' && !c.isOpen());
         const ammeters = this.components.filter(c => c.type === 'ammeter');
 
-        // 简单串联：所有电阻相加
         for (const resistor of resistors) {
             totalResistance += resistor.getResistance();
         }
@@ -691,11 +721,7 @@ class CircuitSimulator {
             totalResistance += ammeter.getResistance();
         }
 
-        // 欧姆定律：I = U / R
-        if (totalResistance > 0) {
-            return totalVoltage / totalResistance;
-        }
-        return 0;
+        return totalResistance > 0 ? totalVoltage / totalResistance : 0;
     }
 
     /**

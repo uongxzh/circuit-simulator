@@ -92,6 +92,10 @@ class CircuitStorage {
             globalThis.circuitComponents = [];
             globalThis.connections = [];
             
+            // 计算保存数据中的最大ID，确保创建过程不会产生冲突
+            const maxSavedId = circuitData.components.reduce((max, c) => Math.max(max, c.id || 0), 0);
+            globalThis.nextComponentId = maxSavedId + 1;
+            
             // 重新创建所有组件
             circuitData.components.forEach(componentData => {
                 try {
@@ -99,20 +103,11 @@ class CircuitStorage {
                         componentData.type,
                         componentData.x,
                         componentData.y,
-                        componentData.id
+                        componentData.properties || {}
                     );
                     
-                    // 恢复组件属性
-                    if (componentData.properties) {
-                        Object.keys(componentData.properties).forEach(key => {
-                            const setter = `set${key.charAt(0).toUpperCase() + key.slice(1)}`;
-                            if (typeof component[setter] === 'function') {
-                                component[setter](componentData.properties[key]);
-                            } else {
-                                component[key] = componentData.properties[key];
-                            }
-                        });
-                    }
+                    // 恢复原始ID
+                    component.id = componentData.id;
                     
                     globalThis.circuitComponents.push(component);
                 } catch (error) {
@@ -121,13 +116,8 @@ class CircuitStorage {
             });
 
             // 更新 nextComponentId
-            if (circuitData.nextComponentId) {
-                globalThis.nextComponentId = circuitData.nextComponentId;
-            } else {
-                // 如果没有保存 nextComponentId，从现有组件计算
-                const maxId = globalThis.circuitComponents.reduce((max, comp) => Math.max(max, comp.id), 0);
-                globalThis.nextComponentId = maxId + 1;
-            }
+            const maxId = globalThis.circuitComponents.reduce((max, comp) => Math.max(max, comp.id), 0);
+            globalThis.nextComponentId = maxId + 1;
 
             // 重建连接关系
             circuitData.connections.forEach(connData => {

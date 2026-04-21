@@ -206,6 +206,22 @@ class Switch extends Component {
     getResistance() {
         return this.properties.isOpen ? Infinity : this.properties.resistance;
     }
+
+    setCurrent(current) {
+        this.properties.current = parseFloat(current);
+    }
+
+    getCurrent() {
+        return this.properties.current || 0;
+    }
+
+    setVoltage(voltage) {
+        this.properties.voltage = parseFloat(voltage);
+    }
+
+    getVoltage() {
+        return this.properties.voltage || 0;
+    }
 }
 
 /**
