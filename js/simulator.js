@@ -181,72 +181,88 @@ class CircuitSimulator {
     }
 
     /**
-     * 短路检测
+     * 短路检测（基于端点图）
      */
     checkForShortCircuit(graph) {
         const batteries = this.components.filter(c => c.type === 'battery');
-
         for (const battery of batteries) {
-            const visited = new Set();
-            if (this.detectShortCircuitDFS(graph, battery.id, battery.id, visited, 0, 0, false)) {
+            if (this.detectShortCircuitPinBased(battery.id)) {
                 throw new Error('警告: 检测到可能的短路！');
             }
         }
     }
 
     /**
-     * 短路检测DFS
-     * @param {boolean} hasResistor - 路径上是否已经有电阻元件
+     * 基于端点图的短路检测
+     * 从电池的一个端点出发，寻找回到起点的低阻回路
      */
-    detectShortCircuitDFS(graph, startId, currentId, visited, resistance, depth, hasResistor) {
+    detectShortCircuitPinBased(startCompId) {
+        const startPin = `${startCompId}-0`;
+        return this.shortCircuitPinDFS(startPin, startPin, new Set(), 0, 0, false);
+    }
+
+    /**
+     * 端点图短路检测 DFS
+     * 路径模式: wire -> component -> wire -> component -> ...
+     */
+    shortCircuitPinDFS(startPin, currentPin, visited, resistance, depth, hasLoad) {
         if (depth > 50) return false;
-        if (visited.has(currentId) && !(currentId === startId && depth >= 1)) return false;
+        visited.add(currentPin);
 
-        visited.add(currentId);
-        const currentNode = graph.get(currentId);
-        const component = currentNode.component;
+        // 解析当前端点
+        const parts = currentPin.split('-');
+        const compId = parseInt(parts[0]);
+        const pinIdx = parseInt(parts[1]);
+        const comp = this.components.find(c => c.id === compId);
+        if (!comp) return false;
 
-        // 更新路径上是否有电阻
-        const nowHasResistor = hasResistor || component.type === 'resistor' || component.type === 'ammeter' || component.type === 'voltmeter';
+        // 走到该元件的另一个端点（元件内部边）
+        const otherPinIdx = pinIdx === 0 ? 1 : 0;
+        const otherPin = `${compId}-${otherPinIdx}`;
 
-        // 累加电阻
-        let currentResistance = resistance;
-        if (component.type === 'resistor') {
-            currentResistance += component.getResistance();
-        } else if (component.type === 'switch' && !component.isOpen()) {
-            currentResistance += component.getResistance();
-        } else if (component.type === 'ammeter') {
-            currentResistance += component.getResistance();
-        } else if (component.type === 'battery') {
-            // 电源不参与电阻计算
+        // 更新电阻
+        let nextResistance = resistance;
+        if (comp.type === 'resistor') {
+            nextResistance += comp.getResistance();
+        } else if (comp.type === 'switch' && !comp.isOpen()) {
+            nextResistance += comp.getResistance();
+        } else if (comp.type === 'ammeter') {
+            nextResistance += comp.getResistance();
+        } else if (comp.type === 'battery') {
+            nextResistance += comp.getInternalResistance ? comp.getInternalResistance() : 0.1;
         }
 
-        // 如果电阻极低且回到起点，并且路径上没有负载元件，可能是短路
-        // depth >= 2 确保路径至少包含两个非电源元件
-        if (currentId === startId && depth >= 2 && !nowHasResistor && currentResistance <= 0.5) {
-            return true;
+        // 更新负载标记
+        const nextHasLoad = hasLoad || comp.type === 'resistor' || comp.type === 'ammeter' || comp.type === 'voltmeter';
+
+        // 检查是否通过元件边回到起点
+        if (otherPin === startPin && depth >= 1) {
+            if (!nextHasLoad && nextResistance <= 0.5) {
+                return true;
+            }
         }
 
-        // 探索邻居
-        for (const neighbor of currentNode.neighbors) {
-            const neighborId = neighbor.id;
-            const neighborComponent = graph.get(neighborId).component;
+        // 从 otherPin 出发，通过导线走到其他端点
+        if (!visited.has(otherPin)) {
+            for (const conn of this.connections) {
+                const fromIdx = conn.fromPointIndex !== null ? conn.fromPointIndex : 0;
+                const toIdx = conn.toPointIndex !== null ? conn.toPointIndex : 1;
+                const connFromPin = `${conn.fromComponentId}-${fromIdx}`;
+                const connToPin = `${conn.toComponentId}-${toIdx}`;
 
-            // 跳过断开的开关
-            if (neighborComponent.type === 'switch' && neighborComponent.isOpen()) {
-                continue;
-            }
+                let nextPin = null;
+                if (connFromPin === otherPin) nextPin = connToPin;
+                else if (connToPin === otherPin) nextPin = connFromPin;
 
-            if (neighborId === startId && depth >= 2) {
-                // 短路检测：路径上没有负载元件且电阻低于0.5欧姆
-                if (!nowHasResistor && currentResistance <= 0.5) {
-                    return true; // 低阻回路，可能是短路
-                }
-            }
-
-            if (!visited.has(neighborId)) {
-                if (this.detectShortCircuitDFS(graph, startId, neighborId, new Set(visited), currentResistance, depth + 1, nowHasResistor)) {
-                    return true;
+                if (nextPin) {
+                    if (nextPin === startPin && depth >= 1) {
+                        if (!nextHasLoad && nextResistance <= 0.5) return true;
+                    }
+                    if (!visited.has(nextPin)) {
+                        if (this.shortCircuitPinDFS(startPin, nextPin, new Set(visited), nextResistance, depth + 1, nextHasLoad)) {
+                            return true;
+                        }
+                    }
                 }
             }
         }
@@ -364,25 +380,63 @@ class CircuitSimulator {
             switches: switches,
             ammeters: ammeters,
             voltmeters: voltmeters, // 电压表单独记录
-            isParallel: pathCount > 1,
+            isParallel: pathCount > 2,
             nodeConnections: nodeConnections,
             parallelPaths: pathCount
         };
     }
 
     /**
-     * 构建节点连接关系
+     * 构建节点连接关系（基于端点的电气节点）
      */
     buildNodeConnections(circuit) {
-        const nodeMap = new Map();
+        // 使用并查集合并导线连接的端点，形成电气节点
+        const circuitIds = new Set(circuit.map(c => c.id));
+        const pinParent = new Map();
 
-        for (const component of circuit) {
-            for (const connectedId of component.connections) {
-                if (!nodeMap.has(component.id)) {
-                    nodeMap.set(component.id, []);
-                }
-                nodeMap.get(component.id).push(connectedId);
+        function find(pin) {
+            if (!pinParent.has(pin)) pinParent.set(pin, pin);
+            if (pinParent.get(pin) !== pin) {
+                const parent = find(pinParent.get(pin));
+                pinParent.set(pin, parent);
+                return parent;
             }
+            return pinParent.get(pin);
+        }
+
+        function union(pin1, pin2) {
+            const root1 = find(pin1);
+            const root2 = find(pin2);
+            if (root1 !== root2) pinParent.set(root1, root2);
+        }
+
+        // 为电路中的每个元件注册端点
+        for (const comp of circuit) {
+            find(`${comp.id}-0`);
+            find(`${comp.id}-1`);
+        }
+
+        // 合并导线连接的端点（只处理与当前电路相关的连接）
+        for (const conn of this.connections) {
+            if (!circuitIds.has(conn.fromComponentId) || !circuitIds.has(conn.toComponentId)) {
+                continue;
+            }
+            const fromIdx = conn.fromPointIndex !== null ? conn.fromPointIndex : 0;
+            const toIdx = conn.toPointIndex !== null ? conn.toPointIndex : 1;
+            union(`${conn.fromComponentId}-${fromIdx}`, `${conn.toComponentId}-${toIdx}`);
+        }
+
+        // 计算每个电气节点连接的元件数量
+        const nodeMap = new Map(); // unionId -> Set of component IDs
+
+        for (const comp of circuit) {
+            const u0 = find(`${comp.id}-0`);
+            const u1 = find(`${comp.id}-1`);
+
+            if (!nodeMap.has(u0)) nodeMap.set(u0, new Set());
+            if (!nodeMap.has(u1)) nodeMap.set(u1, new Set());
+            nodeMap.get(u0).add(comp.id);
+            nodeMap.get(u1).add(comp.id);
         }
 
         return nodeMap;
@@ -390,30 +444,15 @@ class CircuitSimulator {
 
     /**
      * 计算并联路径数量
-     * 修复：检测实际分支点，而不是简单计算连接数
-     * - series: 所有中间节点 degree=2（无分支）
-     * - parallel: 至少一个节点 degree>2（分支点）
+     * 基于电气节点的最大度数判断
+     * 串联电路 maxBranch=2，并联电路 maxBranch>=3
      */
     countParallelPaths(nodeConnections) {
-        let maxDegree = 0;
-        let hasBranchJunction = false;
-
-        nodeConnections.forEach((connections) => {
-            const degree = connections.length;
-            if (degree > maxDegree) {
-                maxDegree = degree;
-            }
-            if (degree > 2) {
-                hasBranchJunction = true;
-            }
+        let maxBranch = 0;
+        nodeConnections.forEach((componentSet) => {
+            maxBranch = Math.max(maxBranch, componentSet.size);
         });
-
-        // 如果有分支点(degree>2)，则是并联
-        // 否则是串联（所有中间节点都只有前后两个连接）
-        if (hasBranchJunction) {
-            return maxDegree;
-        }
-        return 1; // series: 单一路径，无分支
+        return maxBranch;
     }
 
     /**
@@ -706,9 +745,10 @@ class CircuitSimulator {
             return 0;
         }
 
-        // 尝试通过拓扑分析计算等效电阻
+        // 尝试通过拓扑分析计算等效电阻（排除电压表，电压表是测量仪器不影响主电路）
         try {
-            const analysis = this.analyzeTopology(this.components);
+            const mainCircuitComponents = this.components.filter(c => c.type !== 'voltmeter');
+            const analysis = this.analyzeTopology(mainCircuitComponents);
             const totalResistance = this.calculateEquivalentResistance(analysis);
             if (totalResistance > 0 && isFinite(totalResistance)) {
                 return totalVoltage / totalResistance;
