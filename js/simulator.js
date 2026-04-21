@@ -390,18 +390,30 @@ class CircuitSimulator {
 
     /**
      * 计算并联路径数量
+     * 修复：检测实际分支点，而不是简单计算连接数
+     * - series: 所有中间节点 degree=2（无分支）
+     * - parallel: 至少一个节点 degree>2（分支点）
      */
     countParallelPaths(nodeConnections) {
-        // 简单的并行路径检查
-        let maxBranch = 0;
+        let maxDegree = 0;
+        let hasBranchJunction = false;
 
         nodeConnections.forEach((connections) => {
-            if (connections.length > maxBranch) {
-                maxBranch = connections.length;
+            const degree = connections.length;
+            if (degree > maxDegree) {
+                maxDegree = degree;
+            }
+            if (degree > 2) {
+                hasBranchJunction = true;
             }
         });
 
-        return maxBranch;
+        // 如果有分支点(degree>2)，则是并联
+        // 否则是串联（所有中间节点都只有前后两个连接）
+        if (hasBranchJunction) {
+            return maxDegree;
+        }
+        return 1; // series: 单一路径，无分支
     }
 
     /**
