@@ -51,18 +51,19 @@ class AddComponentCommand extends Command {
             this.data.properties
         );
         
-        // 恢复属性
+        // 恢复属性（只修改 component.properties，避免覆盖方法）
         if (this.data.properties) {
             Object.keys(this.data.properties).forEach(key => {
                 const setter = `set${key.charAt(0).toUpperCase() + key.slice(1)}`;
                 if (typeof component[setter] === 'function') {
                     component[setter](this.data.properties[key]);
-                } else {
-                    component[key] = this.data.properties[key];
+                } else if (component.properties && key in component.properties) {
+                    component.properties[key] = this.data.properties[key];
                 }
             });
         }
         
+        this.data.id = component.id;
         globalThis.circuitComponents.push(component);
         return component;
     }

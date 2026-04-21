@@ -199,7 +199,7 @@ class CircuitSimulator {
      */
     detectShortCircuitDFS(graph, startId, currentId, visited, resistance, depth) {
         if (depth > 50) return false;
-        if (visited.has(currentId)) return false;
+        if (visited.has(currentId) && !(currentId === startId && depth > 1)) return false;
 
         visited.add(currentId);
         const currentNode = graph.get(currentId);
@@ -218,7 +218,7 @@ class CircuitSimulator {
         }
 
         // 如果电阻极低且回到起点，可能是短路
-        if (currentId === startId && depth > 1 && currentResistance < 1) {
+        if (currentId === startId && depth > 1 && currentResistance < 0.01) {
             return true;
         }
 
@@ -233,9 +233,8 @@ class CircuitSimulator {
             }
 
             if (neighborId === startId && depth > 1) {
-                // 短路检测：电阻低于1欧姆认为是可能的短路
-                // 与上面的检测保持一致（都是 < 1）
-                if (currentResistance < 1) {
+                // 短路检测：电阻低于0.01欧姆认为是可能的短路
+                if (currentResistance < 0.01) {
                     return true; // 低阻回路，可能是短路
                 }
             }
@@ -431,23 +430,21 @@ class CircuitSimulator {
 
         let totalResistance = 0;
 
-        if (analysis.isParallel && analysis.resistors.length > 1) {
-            // 并联电路：先计算并联部分的等效电阻
-            const parallelResistance = this.calculateParallelResistance(analysis.resistors);
-            
-            // 并联等效电阻 + 串联元件电阻
-            totalResistance = parallelResistance;
-            
-            // 串联元件（开关、电流表）应该加到并联等效电阻上
-            // 但这些元件通常与并联部分串联
+        if (analysis.isParallel && analysis.resistors.length > 0) {
+            // 并联电路：所有电阻、闭合开关、电流表都参与并联计算
+            const parallelComponents = [];
+            for (const resistor of analysis.resistors) {
+                parallelComponents.push(resistor);
+            }
             for (const sw of analysis.switches) {
-                if (sw.getResistance() > 0 && sw.getResistance() !== Infinity) {
-                    totalResistance += sw.getResistance();
-                }
+                parallelComponents.push(sw);
             }
             for (const ammeter of analysis.ammeters) {
-                totalResistance += ammeter.getResistance();
+                parallelComponents.push(ammeter);
             }
+            
+            // 计算并联等效电阻
+            totalResistance = this.calculateParallelResistance(parallelComponents);
         } else {
             // 串联电路：所有电阻直接相加
             for (const r of allResistances) {
@@ -516,6 +513,11 @@ class CircuitSimulator {
             totalResistance += resistor.getResistance();
         }
 
+        for (const sw of analysis.switches) {
+            seriesComponents.push({ component: sw, resistance: sw.getResistance() });
+            totalResistance += sw.getResistance();
+        }
+
         for (const ammeter of analysis.ammeters) {
             seriesComponents.push({ component: ammeter, resistance: ammeter.getResistance() });
             totalResistance += ammeter.getResistance();
@@ -554,10 +556,18 @@ class CircuitSimulator {
             resistor.setCurrent(current);
         }
 
-        // 更新电流表读数
+        // 闭合开关（视为小电阻）
+        for (const sw of analysis.switches) {
+            sw.setVoltage(totalVoltage);
+            const current = totalVoltage / sw.getResistance();
+            sw.setCurrent(current);
+        }
+
+        // 电流表读数
         for (const ammeter of analysis.ammeters) {
-            const branchCurrent = this.calculateBranchCurrent(ammeter, analysis);
-            ammeter.setCurrent(branchCurrent);
+            // 简化的电流表读数：假设与电阻并联，计算通过电流表的电流
+            const current = totalVoltage / ammeter.getResistance();
+            ammeter.setCurrent(current);
         }
     }
 

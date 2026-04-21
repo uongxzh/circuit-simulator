@@ -132,6 +132,9 @@ header .subtitle {
 
 .battery-icon { background-color: var(--success-color); }
 .resistor-icon { background-color: var(--warning-color); }
+.switch-icon { background-color: var(--danger-color); }
+.ammeter-icon { background-color: var(--secondary-color); }
+.voltmeter-icon { background-color: #9b59b6; }
 /* 工作区样式 */
 .workspace {
     flex: 1;

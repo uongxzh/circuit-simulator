@@ -342,12 +342,25 @@ function updateMeasurements() {
 }
 
 /**
+ * 将鼠标/CSS坐标转换为Canvas内部坐标
+ */
+function getCanvasCoordinates(event) {
+    const rect = canvas.getBoundingClientRect();
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    return {
+        x: (event.clientX - rect.left) * scaleX,
+        y: (event.clientY - rect.top) * scaleY
+    };
+}
+
+/**
  * Canvas鼠标按下
  */
 function onCanvasMouseDown(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const coords = getCanvasCoordinates(event);
+    const x = coords.x;
+    const y = coords.y;
     const point = new Point(x, y);
     
     // 记录拖拽起始位置
@@ -426,9 +439,9 @@ function onCanvasMouseDown(event) {
  * Canvas鼠标移动
  */
 function onCanvasMouseMove(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const coords = getCanvasCoordinates(event);
+    const x = coords.x;
+    const y = coords.y;
     
     mousePos = { x: x, y: y }; // 更新当前鼠标位置
 
@@ -464,9 +477,9 @@ function onCanvasMouseMove(event) {
  * Canvas鼠标释放
  */
 function onCanvasMouseUp(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const coords = getCanvasCoordinates(event);
+    const x = coords.x;
+    const y = coords.y;
     
     // 记录组件移动到历史
     if (isDragging && selectedComponent && dragStartPos) {
@@ -507,9 +520,9 @@ function onCanvasMouseUp(event) {
  * Canvas点击事件
  */
 function onCanvasClick(event) {
-    const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const coords = getCanvasCoordinates(event);
+    const x = coords.x;
+    const y = coords.y;
     
     // 检查拖拽距离，如果移动超过5像素，则不触发点击
     if (dragStartPos) {
@@ -568,25 +581,24 @@ function onCanvasDrop(event) {
     if (!componentType) return;
 
     const rect = canvas.getBoundingClientRect();
-    const x = event.clientX - rect.left;
-    const y = event.clientY - rect.top;
+    const scaleX = canvas.width / rect.width;
+    const scaleY = canvas.height / rect.height;
+    const x = (event.clientX - rect.left) * scaleX;
+    const y = (event.clientY - rect.top) * scaleY;
 
     try {
-        // 创建组件
-        const component = ComponentFactory.createComponent(componentType, x, y);
-        
         // 使用历史记录
         if (globalThis.commandHistory) {
             const command = CommandFactory.createCommand(CommandType.ADD_COMPONENT, {
-                id: component.id,
                 type: componentType,
                 x: x,
                 y: y,
-                properties: component.properties || {}
+                properties: {}
             });
             globalThis.commandHistory.execute(command);
         } else {
             // 备份方式，如果历史记录未初始化
+            const component = ComponentFactory.createComponent(componentType, x, y);
             globalThis.circuitComponents.push(component);
         }
 
