@@ -1,5 +1,9 @@
 /* 电路模拟器样式 */
 
+html {
+    overflow-y: auto;
+}
+
 :root {
     --primary-color: #2c3e50;
     --secondary-color: #3498db;
