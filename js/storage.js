@@ -37,6 +37,7 @@ class CircuitStorage {
                     type: component.type,
                     x: component.x,
                     y: component.y,
+                    rotation: component.rotation || 0,
                     properties: {}
                 };
 
@@ -59,13 +60,18 @@ class CircuitStorage {
 
             // 序列化连接关系
             globalThis.connections.forEach(connection => {
-                circuitData.connections.push({
+                const connData = {
                     id: connection.id,
                     fromComponentId: connection.fromComponentId,
                     toComponentId: connection.toComponentId,
                     fromPoint: { x: connection.fromPoint.x, y: connection.fromPoint.y },
-                    toPoint: { x: connection.toPoint.x, y: connection.toPoint.y }
-                });
+                    toPoint: { x: connection.toPoint.x, y: connection.toPoint.y },
+                    fromPointIndex: connection.fromPointIndex,
+                    toPointIndex: connection.toPointIndex,
+                    mode: connection.mode || 'straight',
+                    controlPoints: connection.controlPoints ? connection.controlPoints.map(cp => ({x: cp.x, y: cp.y})) : []
+                };
+                circuitData.connections.push(connData);
             });
 
             console.log('Storage: 序列化成功，包含', circuitData.components.length, '个组件和', circuitData.connections.length, '个连接');
@@ -88,9 +94,9 @@ class CircuitStorage {
 
             console.log('Storage: 开始反序列化，包含', circuitData.components.length, '个组件和', circuitData.connections.length, '个连接');
 
-            // 清空当前电路
-            globalThis.circuitComponents = [];
-            globalThis.connections = [];
+            // 清空当前电路（保留数组引用，避免断开 circuitSimulator 的绑定）
+            globalThis.circuitComponents.length = 0;
+            globalThis.connections.length = 0;
             
             // 计算保存数据中的最大ID，确保创建过程不会产生冲突
             const maxSavedId = circuitData.components.reduce((max, c) => Math.max(max, c.id || 0), 0);
@@ -108,6 +114,11 @@ class CircuitStorage {
                     
                     // 恢复原始ID
                     component.id = componentData.id;
+                    
+                    // 恢复旋转角度（向后兼容）
+                    if (componentData.rotation !== undefined) {
+                        component.setRotation(componentData.rotation);
+                    }
                     
                     globalThis.circuitComponents.push(component);
                 } catch (error) {
@@ -130,11 +141,21 @@ class CircuitStorage {
                             connData.fromComponentId,
                             connData.toComponentId,
                             new Point(connData.fromPoint.x, connData.fromPoint.y),
-                            new Point(connData.toPoint.x, connData.toPoint.y)
+                            new Point(connData.toPoint.x, connData.toPoint.y),
+                            connData.fromPointIndex,
+                            connData.toPointIndex
                         );
                         
                         if (connData.id !== undefined) {
                             connection.id = connData.id;
+                        }
+                        
+                        // 恢复导线模式和控制点（向后兼容）
+                        if (connData.mode) {
+                            connection.mode = connData.mode;
+                        }
+                        if (connData.controlPoints && connData.controlPoints.length > 0) {
+                            connection.controlPoints = connData.controlPoints.map(cp => ({x: cp.x, y: cp.y}));
                         }
                         
                         globalThis.connections.push(connection);

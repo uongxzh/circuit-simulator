@@ -34,8 +34,31 @@ class Component {
         this.type = type;
         this.x = x;
         this.y = y;
+        this.rotation = 0; // 旋转角度: 0, 90, 180, 270
         this.connections = []; // 与其他元件的连接
         this.properties = {};
+    }
+
+    /**
+     * 设置旋转角度
+     */
+    setRotation(rotation) {
+        this.rotation = ((rotation % 360) + 360) % 360;
+        // 标准化为 0, 90, 180, 270
+        if (this.rotation !== 0 && this.rotation !== 90 && this.rotation !== 180 && this.rotation !== 270) {
+            // 取最接近的标准角度
+            const angles = [0, 90, 180, 270];
+            this.rotation = angles.reduce((prev, curr) =>
+                Math.abs(curr - this.rotation) < Math.abs(prev - this.rotation) ? curr : prev
+            );
+        }
+    }
+
+    /**
+     * 获取旋转角度
+     */
+    getRotation() {
+        return this.rotation;
     }
 
     /**
@@ -58,29 +81,63 @@ class Component {
     }
 
     /**
-     * 获取元件上的连接点
+     * 获取元件上的连接点（支持旋转）
      */
     getConnectionPoints() {
-        // 默认返回元件的两个端点，index0=上, index1=下
-        return [
-            new Point(this.x, this.y - 30, 0), // 上端点
-            new Point(this.x, this.y + 30, 1)  // 下端点
-        ];
+        const offset = 30; // 引脚偏移距离
+        switch (this.rotation) {
+            case 90:
+                return [
+                    new Point(this.x - offset, this.y, 0), // 左端点
+                    new Point(this.x + offset, this.y, 1)  // 右端点
+                ];
+            case 180:
+                return [
+                    new Point(this.x, this.y + offset, 0), // 下端点
+                    new Point(this.x, this.y - offset, 1)  // 上端点
+                ];
+            case 270:
+                return [
+                    new Point(this.x + offset, this.y, 0), // 右端点
+                    new Point(this.x - offset, this.y, 1)  // 左端点
+                ];
+            case 0:
+            default:
+                return [
+                    new Point(this.x, this.y - offset, 0), // 上端点
+                    new Point(this.x, this.y + offset, 1)  // 下端点
+                ];
+        }
     }
 
     /**
-     * 根据索引获取特定的连接点
-     * @param {number} index - 端点索引 (0=上, 1=下)
+     * 根据索引获取特定的连接点（支持旋转）
+     * @param {number} index - 端点索引 (0=上/左, 1=下/右)
      * @returns {Point} 对应的连接点
      */
     getConnectionPoint(index) {
-        if (index === 0) {
-            return new Point(this.x, this.y - 30, 0);
-        } else if (index === 1) {
-            return new Point(this.x, this.y + 30, 1);
+        const offset = 30;
+        switch (this.rotation) {
+            case 90:
+                if (index === 0) return new Point(this.x - offset, this.y, 0);
+                if (index === 1) return new Point(this.x + offset, this.y, 1);
+                break;
+            case 180:
+                if (index === 0) return new Point(this.x, this.y + offset, 0);
+                if (index === 1) return new Point(this.x, this.y - offset, 1);
+                break;
+            case 270:
+                if (index === 0) return new Point(this.x + offset, this.y, 0);
+                if (index === 1) return new Point(this.x - offset, this.y, 1);
+                break;
+            case 0:
+            default:
+                if (index === 0) return new Point(this.x, this.y - offset, 0);
+                if (index === 1) return new Point(this.x, this.y + offset, 1);
+                break;
         }
         // 默认返回上端点
-        return new Point(this.x, this.y - 30, 0);
+        return new Point(this.x, this.y - offset, 0);
     }
 
     /**
@@ -275,7 +332,7 @@ class Voltmeter extends Component {
 }
 
 /**
- * 连接类
+ * 连接类（支持弯曲导线）
  */
 class Connection {
     constructor(fromId, toId, fromPoint, toPoint, fromPointIndex = null, toPointIndex = null) {
@@ -284,8 +341,10 @@ class Connection {
         this.toComponentId = toId;
         this.fromPoint = fromPoint; // 起始点坐标
         this.toPoint = toPoint; // 终点坐标
-        this.fromPointIndex = fromPointIndex; // 起始端点索引 (0=上, 1=下)
-        this.toPointIndex = toPointIndex; // 目标端点索引 (0=上, 1=下)
+        this.fromPointIndex = fromPointIndex; // 起始端点索引 (0=上/左, 1=下/右)
+        this.toPointIndex = toPointIndex; // 目标端点索引 (0=上/左, 1=下/右)
+        this.mode = 'straight'; // 导线模式: 'straight' | 'orthogonal' | 'curve'
+        this.controlPoints = []; // 控制点数组 [{x, y}, ...]
 
         // 如果没有提供端点索引但是 Point 对象有 index 属性，则使用该属性
         if (this.fromPointIndex === null && fromPoint && fromPoint.index !== undefined) {
@@ -294,6 +353,41 @@ class Connection {
         if (this.toPointIndex === null && toPoint && toPoint.index !== undefined) {
             this.toPointIndex = toPoint.index;
         }
+    }
+
+    /**
+     * 设置导线模式
+     */
+    setMode(mode) {
+        if (['straight', 'orthogonal', 'curve'].includes(mode)) {
+            this.mode = mode;
+            // 如果切换到曲线模式且没有控制点，创建默认控制点
+            if (mode === 'curve' && this.controlPoints.length === 0) {
+                this.controlPoints = [this.getDefaultControlPoint()];
+            }
+            // 如果切换到正交模式且没有控制点，创建默认折点
+            if (mode === 'orthogonal' && this.controlPoints.length === 0) {
+                this.controlPoints = [this.getDefaultControlPoint()];
+            }
+        }
+    }
+
+    /**
+     * 获取默认控制点位置（两端点中点）
+     */
+    getDefaultControlPoint() {
+        return {
+            x: (this.fromPoint.x + this.toPoint.x) / 2,
+            y: (this.fromPoint.y + this.toPoint.y) / 2
+        };
+    }
+
+    /**
+     * 更新连接点坐标（元件移动时调用）
+     */
+    updateEndpoints(fromPoint, toPoint) {
+        this.fromPoint = fromPoint;
+        this.toPoint = toPoint;
     }
 
     /**
@@ -321,24 +415,35 @@ class Connection {
  */
 class ComponentFactory {
     static createComponent(type, x, y, properties = {}) {
+        let component;
         switch (type) {
             case 'battery':
-                return new Battery(x, y, properties.voltage || 12);
+                component = new Battery(x, y, properties.voltage || 12);
+                break;
             case 'resistor':
-                return new Resistor(x, y, properties.resistance || 10);
+                component = new Resistor(x, y, properties.resistance || 10);
+                break;
             case 'switch':
                 const sw = new Switch(x, y);
                 if (properties.isOpen !== undefined) {
                     sw.setState(properties.isOpen);
                 }
-                return sw;
+                component = sw;
+                break;
             case 'ammeter':
-                return new Ammeter(x, y);
+                component = new Ammeter(x, y);
+                break;
             case 'voltmeter':
-                return new Voltmeter(x, y);
+                component = new Voltmeter(x, y);
+                break;
             default:
                 throw new Error(`未知的元件类型: ${type}`);
         }
+        // 设置旋转角度
+        if (properties.rotation !== undefined) {
+            component.setRotation(properties.rotation);
+        }
+        return component;
     }
 }
 

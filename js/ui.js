@@ -19,6 +19,8 @@ let tempConnection = null; // 临时连线预览
 let connectionPoints = []; // 所有连接点
 let dragStartPos = null; // 用于判断拖拽距离
 let mousePos = { x: 0, y: 0 }; // 当前鼠标位置
+let draggedControlPoint = null; // 正在拖拽的控制点 { connection, index }
+let hoveredControlPoint = null; // 悬停的控制点
 
 /**
  * 初始化函数
@@ -367,6 +369,18 @@ function onCanvasMouseDown(event) {
     dragStartPos = { x: x, y: y };
     mousePos = { x: x, y: y };
 
+    // 检查是否点击在控制点上
+    const controlPoint = findControlPointAt(point);
+    if (controlPoint && !isConnecting) {
+        draggedControlPoint = controlPoint;
+        selectedWire = controlPoint.connection;
+        selectedComponent = null;
+        clearPropertiesPanel();
+        showWireProperties(controlPoint.connection);
+        redrawCanvas();
+        return;
+    }
+
     // 检查是否点击在连接点上
     const connectionPoint = findConnectionPointAt(point);
     
@@ -445,6 +459,14 @@ function onCanvasMouseMove(event) {
     
     mousePos = { x: x, y: y }; // 更新当前鼠标位置
 
+    if (draggedControlPoint) {
+        // 拖拽导线控制点
+        const cp = draggedControlPoint;
+        cp.connection.controlPoints[cp.index] = { x: x, y: y };
+        redrawCanvas();
+        return;
+    }
+
     if (isDragging && selectedComponent) {
         // 拖拽组件
         selectedComponent.x = x - mouseOffset.x;
@@ -463,13 +485,20 @@ function onCanvasMouseMove(event) {
     const point = new Point(x, y);
     const component = findComponentAt(point);
     const connectionPoint = findConnectionPointAt(point);
+    const cpHover = findControlPointAt(point);
     
-    if (connectionPoint) {
+    if (cpHover) {
+        canvas.style.cursor = 'move';
+        hoveredControlPoint = cpHover;
+    } else if (connectionPoint) {
         canvas.style.cursor = 'crosshair';
+        hoveredControlPoint = null;
     } else if (component) {
         canvas.style.cursor = 'pointer';
+        hoveredControlPoint = null;
     } else {
         canvas.style.cursor = 'default';
+        hoveredControlPoint = null;
     }
 }
 
@@ -507,6 +536,7 @@ function onCanvasMouseUp(event) {
     
     isDragging = false;
     dragStartPos = null;
+    draggedControlPoint = null;
     
     // 如果正在连接但没有完成，取消连接
     if (isConnecting && !tempConnection) {
@@ -646,7 +676,7 @@ function findConnectionPointAt(point) {
 }
 
 /**
- * 查找导线
+ * 查找导线（支持直线/折线/曲线）
  */
 function findWireAt(point) {
     const threshold = 10; // 导线检测距离阈值
@@ -669,14 +699,76 @@ function findWireAt(point) {
                 toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
             }
             
-            // 计算点到线段的距离
-            const distance = pointToLineDistance(point, fromPoint, toPoint);
+            let distance;
+            if (connection.mode === 'curve' && connection.controlPoints.length > 0) {
+                distance = pointToBezierDistance(point, fromPoint, toPoint, connection.controlPoints[0]);
+            } else if (connection.mode === 'orthogonal' && connection.controlPoints.length > 0) {
+                distance = pointToOrthogonalDistance(point, fromPoint, toPoint, connection.controlPoints[0]);
+            } else {
+                distance = pointToLineDistance(point, fromPoint, toPoint);
+            }
+            
             if (distance < threshold) {
                 return connection;
             }
         }
     }
     return null;
+}
+
+/**
+ * 查找控制点
+ */
+function findControlPointAt(point) {
+    const threshold = 12;
+    if (!selectedWire) return null;
+    
+    for (let i = 0; i < selectedWire.controlPoints.length; i++) {
+        const cp = selectedWire.controlPoints[i];
+        const dx = point.x - cp.x;
+        const dy = point.y - cp.y;
+        if (Math.sqrt(dx*dx + dy*dy) < threshold) {
+            return { connection: selectedWire, index: i };
+        }
+    }
+    return null;
+}
+
+/**
+ * 计算点到二次贝塞尔曲线的距离
+ */
+function pointToBezierDistance(point, p0, p2, p1) {
+    // 使用离散采样近似
+    const samples = 20;
+    let minDist = Infinity;
+    for (let t = 0; t <= 1; t += 1/samples) {
+        const x = (1-t)*(1-t)*p0.x + 2*(1-t)*t*p1.x + t*t*p2.x;
+        const y = (1-t)*(1-t)*p0.y + 2*(1-t)*t*p1.y + t*t*p2.y;
+        const d = Math.sqrt((point.x-x)**2 + (point.y-y)**2);
+        if (d < minDist) minDist = d;
+    }
+    return minDist;
+}
+
+/**
+ * 计算点到正交折线的距离
+ */
+function pointToOrthogonalDistance(point, fromPoint, toPoint, controlPoint) {
+    // 确定先水平还是先垂直
+    const midX = (fromPoint.x + toPoint.x) / 2;
+    const useHorizontalFirst = controlPoint.x < midX;
+    
+    let d1, d2;
+    if (useHorizontalFirst) {
+        // 先水平后垂直
+        d1 = pointToLineDistance(point, fromPoint, {x: controlPoint.x, y: fromPoint.y});
+        d2 = pointToLineDistance(point, {x: controlPoint.x, y: fromPoint.y}, toPoint);
+    } else {
+        // 先垂直后水平
+        d1 = pointToLineDistance(point, fromPoint, {x: fromPoint.x, y: controlPoint.y});
+        d2 = pointToLineDistance(point, {x: fromPoint.x, y: controlPoint.y}, toPoint);
+    }
+    return Math.min(d1, d2);
 }
 
 /**
@@ -774,6 +866,16 @@ function showComponentProperties(component) {
     let html = `<h3>元件 ${component.id}</h3>`;
     html += `<p>类型: ${getComponentTypeName(component.type)}</p>`;
 
+    // 添加旋转控制
+    html += `<div style="margin:8px 0;"><label>旋转: 
+        <select id="prop-rotation" onchange="rotateComponent(${component.id}, this.value)">
+            <option value="0" ${component.rotation===0?'selected':''}>0° (上下)</option>
+            <option value="90" ${component.rotation===90?'selected':''}>90° (左右)</option>
+            <option value="180" ${component.rotation===180?'selected':''}>180° (下上)</option>
+            <option value="270" ${component.rotation===270?'selected':''}>270° (右左)</option>
+        </select>
+    </label></div>`;
+
     // 根据类型显示不同属性
     switch (component.type) {
         case 'battery':
@@ -818,6 +920,32 @@ function showComponentProperties(component) {
 /**
  * 更新电池属性
  */
+
+/**
+ * 旋转元件
+ */
+function rotateComponent(componentId, rotation) {
+    const component = globalThis.circuitComponents.find(c => c.id === componentId);
+    if (!component) return;
+    const oldRotation = component.rotation;
+    const newRotation = parseInt(rotation);
+    if (oldRotation !== newRotation) {
+        component.setRotation(newRotation);
+        if (globalThis.commandHistory) {
+            const command = CommandFactory.createCommand(
+                CommandType.UPDATE_PROPERTY,
+                component,
+                'rotation',
+                oldRotation,
+                newRotation
+            );
+            globalThis.commandHistory.execute(command);
+            updateHistoryButtons();
+        }
+        redrawCanvas();
+    }
+}
+
 function updateBatteryProperties(componentId) {
     const component = globalThis.circuitComponents.find(c => c.id === componentId);
     if (!component || component.type !== 'battery') return;
@@ -913,6 +1041,35 @@ function toggleSwitch(componentId) {
 /**
  * 清除属性面板
  */
+
+/**
+ * 显示导线属性
+ */
+function showWireProperties(connection) {
+    const propertiesContent = document.getElementById('properties-content');
+    if (!propertiesContent) return;
+    let html = `<h3>导线 ${connection.fromComponentId} → ${connection.toComponentId}</h3>`;
+    html += `<p>连接模式:</p>`;
+    html += `<select id="wire-mode" onchange="updateWireMode('${connection.id}', this.value)">`;
+    html += `<option value="straight" ${connection.mode==='straight'?'selected':''}>直线</option>`;
+    html += `<option value="orthogonal" ${connection.mode==='orthogonal'?'selected':''}>正交折线</option>`;
+    html += `<option value="curve" ${connection.mode==='curve'?'selected':''}>贝塞尔曲线</option>`;
+    html += `</select>`;
+    html += `<p style="margin-top:8px;color:#666;font-size:12px;">提示: 选中导线后拖拽控制点可调节形状</p>`;
+    propertiesContent.innerHTML = html;
+}
+
+/**
+ * 更新导线模式
+ */
+function updateWireMode(connectionId, mode) {
+    const conn = globalThis.connections.find(c => c.id === connectionId);
+    if (conn && conn.mode !== mode) {
+        conn.setMode(mode);
+        redrawCanvas();
+    }
+}
+
 function clearPropertiesPanel() {
     const propertiesContent = document.getElementById('properties-content');
     if (propertiesContent) {
@@ -980,8 +1137,36 @@ function redrawCanvas() {
 /**
  * 绘制网格
  */
+
+/**
+ * 重绘画布
+ */
+function redrawCanvas() {
+    if (!ctx) return;
+
+    // 清空画布
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+    // 绘制背景网格
+    drawGrid();
+
+    // 绘制连接（导线）
+    drawConnections();
+
+    // 绘制元件
+    drawComponents();
+
+    // 绘制控制点（如果有选中的导线）
+    if (selectedWire) {
+        drawControlPoints();
+    }
+}
+
+/**
+ * 绘制网格
+ */
 function drawGrid() {
-    ctx.strokeStyle = '#f0f0f0';
+    ctx.strokeStyle = '#e8e8e8';
     ctx.lineWidth = 0.5;
 
     for (let x = 0; x <= canvas.width; x += 20) {
@@ -997,59 +1182,176 @@ function drawGrid() {
         ctx.lineTo(canvas.width, y);
         ctx.stroke();
     }
+
+    // 网格交点小圆点
+    ctx.fillStyle = '#ddd';
+    for (let x = 0; x <= canvas.width; x += 40) {
+        for (let y = 0; y <= canvas.height; y += 40) {
+            ctx.beginPath();
+            ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+            ctx.fill();
+        }
+    }
 }
 
 /**
  * 绘制连接
  */
 function drawConnections() {
-    // 绘制已完成的连接（黑色实线）
     for (const connection of globalThis.connections) {
         const fromComponent = globalThis.circuitComponents.find(c => c.id === connection.fromComponentId);
         const toComponent = globalThis.circuitComponents.find(c => c.id === connection.toComponentId);
-        
-        if (fromComponent && toComponent) {
-            // 设置样式，选中的导线使用红色高亮
-            if (selectedWire && selectedWire.id === connection.id) {
-                ctx.strokeStyle = '#ff0000';
-                ctx.lineWidth = 4;
-            } else {
-                ctx.strokeStyle = '#000000';
-                ctx.lineWidth = 2;
-            }
 
-            // 计算连接点 - 使用存储的端点索引获取实际端点位置
+        if (fromComponent && toComponent) {
             let fromPoint, toPoint;
             if (connection.fromPointIndex !== null && connection.fromPointIndex !== undefined) {
                 fromPoint = fromComponent.getConnectionPoint(connection.fromPointIndex);
             } else {
-                fromPoint = fromComponent.getNearestConnectionPoint(connection.fromPoint || new Point(toComponent.x, toComponent.y));
+                fromPoint = fromComponent.getNearestConnectionPoint(connection.toPoint || new Point(toComponent.x, toComponent.y));
             }
             if (connection.toPointIndex !== null && connection.toPointIndex !== undefined) {
                 toPoint = toComponent.getConnectionPoint(connection.toPointIndex);
             } else {
-                toPoint = toComponent.getNearestConnectionPoint(connection.toPoint || new Point(fromComponent.x, fromComponent.y));
+                toPoint = toComponent.getNearestConnectionPoint(connection.fromPoint || new Point(fromComponent.x, fromComponent.y));
             }
 
-            ctx.beginPath();
-            ctx.moveTo(fromPoint.x, fromPoint.y);
-            ctx.lineTo(toPoint.x, toPoint.y);
-            ctx.stroke();
+            // 更新连接点坐标
+            connection.updateEndpoints(fromPoint, toPoint);
+
+            // 设置样式
+            if (selectedWire && selectedWire.id === connection.id) {
+                ctx.strokeStyle = '#e74c3c';
+                ctx.lineWidth = 3;
+            } else {
+                ctx.strokeStyle = '#2c3e50';
+                ctx.lineWidth = 2.5;
+            }
+            ctx.lineCap = 'round';
+            ctx.lineJoin = 'round';
+
+            drawWirePath(ctx, connection, fromPoint, toPoint);
+
+            // 模拟运行时显示电流方向
+            if (globalThis.circuitSimulator && globalThis.circuitSimulator.isSimulating) {
+                drawCurrentArrowOnWire(fromPoint, toPoint, connection);
+            }
         }
     }
-    
+
     // 绘制临时连线预览（灰色虚线）
     if (tempConnection && isConnecting) {
-        ctx.strokeStyle = '#666666';
+        ctx.strokeStyle = '#95a5a6';
         ctx.lineWidth = 2;
-        ctx.setLineDash([5, 5]);
-        
+        ctx.setLineDash([6, 4]);
+        ctx.lineCap = 'round';
+
         ctx.beginPath();
         ctx.moveTo(tempConnection.from.x, tempConnection.from.y);
         ctx.lineTo(tempConnection.to.x, tempConnection.to.y);
         ctx.stroke();
-        
-        ctx.setLineDash([]); // 重置虚线
+
+        ctx.setLineDash([]);
+    }
+}
+
+/**
+ * 绘制单根导线路径
+ */
+function drawWirePath(ctx, connection, fromPoint, toPoint) {
+    ctx.beginPath();
+    ctx.moveTo(fromPoint.x, fromPoint.y);
+
+    if (connection.mode === 'curve' && connection.controlPoints.length > 0) {
+        const cp = connection.controlPoints[0];
+        ctx.quadraticCurveTo(cp.x, cp.y, toPoint.x, toPoint.y);
+    } else if (connection.mode === 'orthogonal' && connection.controlPoints.length > 0) {
+        const cp = connection.controlPoints[0];
+        const midX = (fromPoint.x + toPoint.x) / 2;
+        const useHorizontalFirst = cp.x < midX;
+        if (useHorizontalFirst) {
+            ctx.lineTo(cp.x, fromPoint.y);
+            ctx.lineTo(cp.x, toPoint.y);
+        } else {
+            ctx.lineTo(fromPoint.x, cp.y);
+            ctx.lineTo(toPoint.x, cp.y);
+        }
+        ctx.lineTo(toPoint.x, toPoint.y);
+    } else {
+        ctx.lineTo(toPoint.x, toPoint.y);
+    }
+    ctx.stroke();
+}
+
+/**
+ * 绘制导线上的电流方向箭头
+ */
+function drawCurrentArrowOnWire(fromPoint, toPoint, connection) {
+    let midX, midY, angle;
+    if (connection.mode === 'curve' && connection.controlPoints.length > 0) {
+        const cp = connection.controlPoints[0];
+        const t = 0.5;
+        midX = (1-t)*(1-t)*fromPoint.x + 2*(1-t)*t*cp.x + t*t*toPoint.x;
+        midY = (1-t)*(1-t)*fromPoint.y + 2*(1-t)*t*cp.y + t*t*toPoint.y;
+        // 近似切线角度
+        const dt = 0.01;
+        const nx = (1-(t+dt))*(1-(t+dt))*fromPoint.x + 2*(1-(t+dt))*(t+dt)*cp.x + (t+dt)*(t+dt)*toPoint.x;
+        const ny = (1-(t+dt))*(1-(t+dt))*fromPoint.y + 2*(1-(t+dt))*(t+dt)*cp.y + (t+dt)*(t+dt)*toPoint.y;
+        angle = Math.atan2(ny - midY, nx - midX);
+    } else if (connection.mode === 'orthogonal' && connection.controlPoints.length > 0) {
+        const cp = connection.controlPoints[0];
+        const midX_avg = (fromPoint.x + toPoint.x) / 2;
+        if (cp.x < midX_avg) {
+            midX = cp.x;
+            midY = (fromPoint.y + toPoint.y) / 2;
+            angle = fromPoint.y < toPoint.y ? Math.PI/2 : -Math.PI/2;
+        } else {
+            midX = (fromPoint.x + toPoint.x) / 2;
+            midY = cp.y;
+            angle = fromPoint.x < toPoint.x ? 0 : Math.PI;
+        }
+    } else {
+        midX = (fromPoint.x + toPoint.x) / 2;
+        midY = (fromPoint.y + toPoint.y) / 2;
+        angle = Math.atan2(toPoint.y - fromPoint.y, toPoint.x - fromPoint.x);
+    }
+
+    const arrowSize = 8;
+    ctx.fillStyle = '#e74c3c';
+    ctx.beginPath();
+    ctx.moveTo(midX + arrowSize * Math.cos(angle), midY + arrowSize * Math.sin(angle));
+    ctx.lineTo(midX + arrowSize * Math.cos(angle + 2.5), midY + arrowSize * Math.sin(angle + 2.5));
+    ctx.lineTo(midX + arrowSize * Math.cos(angle - 2.5), midY + arrowSize * Math.sin(angle - 2.5));
+    ctx.closePath();
+    ctx.fill();
+}
+
+/**
+ * 绘制控制点
+ */
+function drawControlPoints() {
+    if (!selectedWire || !selectedWire.controlPoints) return;
+
+    for (let i = 0; i < selectedWire.controlPoints.length; i++) {
+        const cp = selectedWire.controlPoints[i];
+
+        // 控制点外圈
+        ctx.strokeStyle = '#e74c3c';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 7, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // 控制点填充
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 5, 0, Math.PI * 2);
+        ctx.fill();
+
+        // 控制点中心
+        ctx.fillStyle = '#e74c3c';
+        ctx.beginPath();
+        ctx.arc(cp.x, cp.y, 3, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
@@ -1058,67 +1360,72 @@ function drawConnections() {
  */
 function drawComponents() {
     for (const component of globalThis.circuitComponents) {
-        // 设置样式
+        ctx.save();
+
+        // 移动到元件中心并旋转
+        ctx.translate(component.x, component.y);
+        ctx.rotate(component.rotation * Math.PI / 180);
+
+        // 选中高亮边框
         if (component === selectedComponent) {
-            ctx.strokeStyle = '#ff6b6b';
-            ctx.lineWidth = 3;
-        } else {
-            ctx.strokeStyle = '#333';
+            ctx.strokeStyle = '#3498db';
             ctx.lineWidth = 2;
+            ctx.setLineDash([4, 3]);
+            ctx.strokeRect(-35, -35, 70, 70);
+            ctx.setLineDash([]);
         }
 
-        // 根据类型绘制不同形状
-        drawComponent(component);
+        // 绘制元件本体
+        drawComponentBody(component);
 
-        // 绘制元件ID
-        ctx.fillStyle = '#666';
-        ctx.font = '12px Arial';
+        ctx.restore();
+
+        // 绘制元件ID（不旋转）
+        ctx.fillStyle = '#7f8c8d';
+        ctx.font = '11px Arial';
         ctx.textAlign = 'center';
-        ctx.fillText(String(component.id), component.x, component.y - 40);
+        ctx.fillText(`#${component.id}`, component.x, component.y - 38);
 
-        // 如果是模拟中，显示读数
+        // 模拟运行时读数
         if (globalThis.circuitSimulator && globalThis.circuitSimulator.isSimulating) {
             drawComponentReadings(component);
         }
     }
-    
-    // 绘制连接点（蓝色圆点）
+
+    // 绘制连接点
     drawConnectionPoints();
 }
 
 /**
- * 绘制连接点（蓝色圆点）
+ * 绘制连接点（金属触点）
  */
 function drawConnectionPoints() {
-    // 收集所有连接点位置
-    const allPoints = new Map(); // 使用Map去重，键为"x,y"
-    
     for (const component of globalThis.circuitComponents) {
         const points = component.getConnectionPoints();
         for (const point of points) {
-            const key = `${point.x},${point.y}`;
-            allPoints.set(key, point);
+            // 引脚金属圆点
+            ctx.fillStyle = '#bdc3c7';
+            ctx.beginPath();
+            ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
+            ctx.fill();
+
+            ctx.strokeStyle = '#7f8c8d';
+            ctx.lineWidth = 1.5;
+            ctx.stroke();
+
+            // 内部高光
+            ctx.fillStyle = '#ecf0f1';
+            ctx.beginPath();
+            ctx.arc(point.x - 1, point.y - 1, 2, 0, Math.PI * 2);
+            ctx.fill();
         }
-    }
-    
-    // 绘制所有连接点
-    for (const point of allPoints.values()) {
-        ctx.fillStyle = '#2196f3'; // 蓝色
-        ctx.beginPath();
-        ctx.arc(point.x, point.y, 5, 0, Math.PI * 2);
-        ctx.fill();
-        
-        // 绘制白色边框
-        ctx.strokeStyle = '#ffffff';
-        ctx.lineWidth = 1;
-        ctx.stroke();
     }
 }
 
 /**
- * 绘制单个组件
+ * 绘制单个元件本体（已在旋转后的坐标系中）
  */
-function drawComponent(component) {
+function drawComponentBody(component) {
     switch (component.type) {
         case 'battery':
             drawBattery(component);
@@ -1139,56 +1446,115 @@ function drawComponent(component) {
 }
 
 /**
+ * 绘制引脚线
+ */
+function drawLead(ctx, yStart, yEnd) {
+    ctx.strokeStyle = '#7f8c8d';
+    ctx.lineWidth = 2.5;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, yStart);
+    ctx.lineTo(0, yEnd);
+    ctx.stroke();
+}
+
+/**
  * 绘制电池
  */
 function drawBattery(component) {
-    ctx.fillStyle = '#ffeb3b';
-    ctx.fillRect(component.x - 30, component.y - 10, 60, 20);
-    ctx.strokeRect(component.x - 30, component.y - 10, 60, 20);
+    // 引脚线
+    drawLead(ctx, -30, -18);
+    drawLead(ctx, 18, 30);
 
-    // 绘制极性
-    ctx.fillStyle = '#000';
-    ctx.fillRect(component.x + 10, component.y - 20, 4, 40);
-    ctx.fillRect(component.x - 14, component.y - 15, 4, 30);
+    // 电池主体（圆柱形）
+    const grad = ctx.createLinearGradient(-12, 0, 12, 0);
+    grad.addColorStop(0, '#7f8c8d');
+    grad.addColorStop(0.25, '#ecf0f1');
+    grad.addColorStop(0.5, '#bdc3c7');
+    grad.addColorStop(0.75, '#95a5a6');
+    grad.addColorStop(1, '#546e7a');
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = '#34495e';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.rect(-10, -18, 20, 36);
+    ctx.fill();
+    ctx.stroke();
 
-    // 显示电压
-    ctx.fillStyle = '#333';
-    ctx.font = '10px Arial';
-    ctx.fillText(`${component.getVoltage()}V`, component.x, component.y - 25);
+    // 顶部正极金属帽（凸起）
+    ctx.fillStyle = '#bdc3c7';
+    ctx.strokeStyle = '#7f8c8d';
+    ctx.beginPath();
+    ctx.rect(-4, -22, 8, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // 底部负极金属帽
+    ctx.fillStyle = '#bdc3c7';
+    ctx.beginPath();
+    ctx.rect(-10, 18, 20, 4);
+    ctx.fill();
+    ctx.stroke();
+
+    // 正极标识（红色 +）
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 12px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('+', 5, -10);
+
+    // 负极标识（蓝色 -）
+    ctx.fillStyle = '#3498db';
+    ctx.fillText('−', -5, 10);
+
+    // 电压标注
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = 'bold 10px Arial';
+    ctx.fillText(`${component.getVoltage()}V`, 0, -26);
 }
 
 /**
  * 绘制电阻
  */
 function drawResistor(component) {
-    ctx.fillStyle = '#e91e63';
-    drawZigzag(component.x - 30, component.y, component.x + 30, component.y);
+    // 引脚线
+    drawLead(ctx, -30, -16);
+    drawLead(ctx, 16, 30);
 
-    // 显示电阻值
-    ctx.fillStyle = '#333';
-    ctx.font = '10px Arial';
-    ctx.fillText(`${component.getResistance()}Ω`, component.x, component.y - 15);
-}
-
-/**
- * 绘制折线（电阻形状）
- */
-function drawZigzag(x1, y1, x2, y2) {
-    const length = x2 - x1;
-    const segments = 5;
-    const segmentWidth = length / segments;
-
+    // 电阻陶瓷主体
+    const grad = ctx.createLinearGradient(-8, 0, 8, 0);
+    grad.addColorStop(0, '#d35400');
+    grad.addColorStop(0.3, '#e67e22');
+    grad.addColorStop(0.7, '#d35400');
+    grad.addColorStop(1, '#a04000');
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = '#6e2c00';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(x1, y1);
-
-    for (let i = 1; i <= segments; i++) {
-        const x = x1 + (i * segmentWidth);
-        const y = (i % 2 === 1) ? y1 - 15 : y1 + 15;
-        ctx.lineTo(x - segmentWidth / 2, y);
-        ctx.lineTo(x, y1);
-    }
-
+    ctx.rect(-8, -16, 16, 32);
+    ctx.fill();
     ctx.stroke();
+
+    // 电阻体（锯齿形）——画在主体上方
+    ctx.strokeStyle = '#fdfefe';
+    ctx.lineWidth = 2;
+    ctx.lineJoin = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -14);
+    ctx.lineTo(0, -10);
+    ctx.lineTo(-5, -6);
+    ctx.lineTo(5, -2);
+    ctx.lineTo(-5, 2);
+    ctx.lineTo(5, 6);
+    ctx.lineTo(0, 10);
+    ctx.lineTo(0, 14);
+    ctx.stroke();
+
+    // 电阻值标注
+    ctx.fillStyle = '#2c3e50';
+    ctx.font = 'bold 10px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${component.getResistance()}Ω`, 0, -22);
 }
 
 /**
@@ -1196,88 +1562,211 @@ function drawZigzag(x1, y1, x2, y2) {
  */
 function drawSwitch(component) {
     const isOpen = component.isOpen();
-    ctx.strokeStyle = isOpen ? '#f44336' : '#4caf50';
-    ctx.lineWidth = 3;
 
+    // 引脚线
+    drawLead(ctx, -30, -14);
+    drawLead(ctx, 14, 30);
+
+    // 底座
+    ctx.fillStyle = '#ecf0f1';
+    ctx.strokeStyle = '#bdc3c7';
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(component.x - 30, component.y);
-
-    if (isOpen) {
-        ctx.lineTo(component.x - 10, component.y);
-        ctx.moveTo(component.x + 10, component.y - 10);
-        ctx.lineTo(component.x + 30, component.y);
-    } else {
-        ctx.lineTo(component.x + 30, component.y);
-    }
-
+    ctx.rect(-14, -14, 28, 28);
+    ctx.fill();
     ctx.stroke();
 
-    // 恢复样式
-    ctx.strokeStyle = '#333';
-    ctx.lineWidth = 2;
+    // 左侧触点（金属圆）
+    ctx.fillStyle = '#95a5a6';
+    ctx.strokeStyle = '#7f8c8d';
+    ctx.beginPath();
+    ctx.arc(0, -14, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
 
-    // 显示状态
-    ctx.fillStyle = '#333';
-    ctx.font = '10px Arial';
-    ctx.fillText(isOpen ? '断开' : '闭合', component.x, component.y - 15);
+    // 右侧触点（金属圆）
+    ctx.beginPath();
+    ctx.arc(0, 14, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.stroke();
+
+    // 闸刀（金属杆）
+    ctx.strokeStyle = isOpen ? '#c0392b' : '#27ae60';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(0, -14);
+    if (isOpen) {
+        ctx.lineTo(10, -2);
+    } else {
+        ctx.lineTo(0, 14);
+    }
+    ctx.stroke();
+
+    // 状态标签
+    ctx.fillStyle = isOpen ? '#c0392b' : '#27ae60';
+    ctx.font = 'bold 9px Arial';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(isOpen ? '断开' : '闭合', 14, 0);
 }
 
 /**
  * 绘制电流表
  */
 function drawAmmeter(component) {
-    ctx.fillStyle = '#2196f3';
+    // 引脚线
+    drawLead(ctx, -30, -22);
+    drawLead(ctx, 22, 30);
+
+    // 金属外框
+    const rimGrad = ctx.createLinearGradient(-22, -22, 22, 22);
+    rimGrad.addColorStop(0, '#5dade2');
+    rimGrad.addColorStop(0.5, '#85c1e9');
+    rimGrad.addColorStop(1, '#2e86c1');
+    ctx.fillStyle = rimGrad;
+    ctx.strokeStyle = '#1f618d';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(component.x, component.y, 20, 0, Math.PI * 2);
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // 绘制字母A
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px Arial';
+    // 表盘背景（玻璃白）
+    ctx.fillStyle = '#fbfcfc';
+    ctx.beginPath();
+    ctx.arc(0, 0, 19, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 刻度线
+    ctx.strokeStyle = '#95a5a6';
+    ctx.lineWidth = 1;
+    for (let i = -60; i <= 60; i += 30) {
+        const rad = (i - 90) * Math.PI / 180;
+        const r1 = 14;
+        const r2 = 17;
+        ctx.beginPath();
+        ctx.moveTo(r1 * Math.cos(rad), r1 * Math.sin(rad));
+        ctx.lineTo(r2 * Math.cos(rad), r2 * Math.sin(rad));
+        ctx.stroke();
+    }
+
+    // 指针（模拟时偏转）
+    let current = component.getCurrent();
+    let angle = -60 + Math.min(current * 30, 120);
+    if (!globalThis.circuitSimulator || !globalThis.circuitSimulator.isSimulating) {
+        angle = 0;
+    }
+    const rad = (angle - 90) * Math.PI / 180;
+    ctx.strokeStyle = '#e74c3c';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(12 * Math.cos(rad), 12 * Math.sin(rad));
+    ctx.stroke();
+
+    // 中心轴
+    ctx.fillStyle = '#2c3e50';
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 文字 A
+    ctx.fillStyle = '#2980b9';
+    ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('A', component.x, component.y);
+    ctx.fillText('A', 0, 5);
 }
 
 /**
  * 绘制电压表
  */
 function drawVoltmeter(component) {
-    ctx.fillStyle = '#9c27b0';
+    // 引脚线
+    drawLead(ctx, -30, -22);
+    drawLead(ctx, 22, 30);
+
+    // 金属外框
+    const rimGrad = ctx.createLinearGradient(-22, -22, 22, 22);
+    rimGrad.addColorStop(0, '#af7ac5');
+    rimGrad.addColorStop(0.5, '#d2b4de');
+    rimGrad.addColorStop(1, '#7d3c98');
+    ctx.fillStyle = rimGrad;
+    ctx.strokeStyle = '#6c3483';
+    ctx.lineWidth = 1.5;
     ctx.beginPath();
-    ctx.arc(component.x, component.y, 20, 0, Math.PI * 2);
+    ctx.arc(0, 0, 22, 0, Math.PI * 2);
     ctx.fill();
     ctx.stroke();
 
-    // 绘制字母V
-    ctx.fillStyle = '#fff';
-    ctx.font = 'bold 16px Arial';
+    // 表盘背景
+    ctx.fillStyle = '#fbfcfc';
+    ctx.beginPath();
+    ctx.arc(0, 0, 19, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 刻度线
+    ctx.strokeStyle = '#95a5a6';
+    ctx.lineWidth = 1;
+    for (let i = -60; i <= 60; i += 30) {
+        const rad = (i - 90) * Math.PI / 180;
+        const r1 = 14;
+        const r2 = 17;
+        ctx.beginPath();
+        ctx.moveTo(r1 * Math.cos(rad), r1 * Math.sin(rad));
+        ctx.lineTo(r2 * Math.cos(rad), r2 * Math.sin(rad));
+        ctx.stroke();
+    }
+
+    // 指针
+    let voltage = component.getVoltage();
+    let angle = -60 + Math.min(voltage * 5, 120);
+    if (!globalThis.circuitSimulator || !globalThis.circuitSimulator.isSimulating) {
+        angle = 0;
+    }
+    const rad = (angle - 90) * Math.PI / 180;
+    ctx.strokeStyle = '#e74c3c';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(12 * Math.cos(rad), 12 * Math.sin(rad));
+    ctx.stroke();
+
+    // 中心轴
+    ctx.fillStyle = '#2c3e50';
+    ctx.beginPath();
+    ctx.arc(0, 0, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+
+    // 文字 V
+    ctx.fillStyle = '#8e44ad';
+    ctx.font = 'bold 14px Arial';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
-    ctx.fillText('V', component.x, component.y);
+    ctx.fillText('V', 0, 5);
 }
 
 /**
  * 绘制组件读数（模拟时）
  */
 function drawComponentReadings(component) {
-    ctx.fillStyle = '#ff6b6b';
-    ctx.font = 'bold 12px Arial';
+    ctx.fillStyle = '#e74c3c';
+    ctx.font = 'bold 11px Arial';
     ctx.textAlign = 'center';
 
     switch (component.type) {
         case 'ammeter':
-            ctx.fillText(`${component.getCurrent().toFixed(3)}A`, component.x, component.y + 35);
+            ctx.fillText(`${component.getCurrent().toFixed(3)}A`, component.x, component.y + 32);
             break;
         case 'voltmeter':
-            ctx.fillText(`${component.getVoltage().toFixed(1)}V`, component.x, component.y + 35);
+            ctx.fillText(`${component.getVoltage().toFixed(1)}V`, component.x, component.y + 32);
             break;
         case 'resistor':
             const current = component.getCurrent();
             if (current > 0) {
-                ctx.fillStyle = '#4caf50';
-                ctx.fillText(`${current.toFixed(3)}A`, component.x, component.y + 20);
+                ctx.fillStyle = '#27ae60';
+                ctx.fillText(`${current.toFixed(3)}A`, component.x, component.y + 26);
             }
             break;
     }

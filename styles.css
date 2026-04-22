@@ -130,11 +130,108 @@ header .subtitle {
     color: white;
 }
 
-.battery-icon { background-color: var(--success-color); }
-.resistor-icon { background-color: var(--warning-color); }
-.switch-icon { background-color: var(--danger-color); }
-.ammeter-icon { background-color: var(--secondary-color); }
-.voltmeter-icon { background-color: #9b59b6; }
+.battery-icon {
+    background: linear-gradient(180deg, #f1c40f 0%, #f39c12 100%);
+    position: relative;
+}
+.battery-icon::before {
+    content: '';
+    position: absolute;
+    left: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 14px;
+    background: #2c3e50;
+    border-radius: 1px;
+}
+.battery-icon::after {
+    content: '';
+    position: absolute;
+    right: 6px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 3px;
+    height: 20px;
+    background: #2c3e50;
+    border-radius: 1px;
+}
+
+.resistor-icon {
+    background: linear-gradient(180deg, #e67e22 0%, #d35400 100%);
+    position: relative;
+}
+.resistor-icon::before {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    width: 24px;
+    height: 10px;
+    background: transparent;
+    border-top: 2px solid #fff;
+    border-bottom: 2px solid #fff;
+}
+
+.switch-icon {
+    background: linear-gradient(180deg, #e74c3c 0%, #c0392b 100%);
+    position: relative;
+}
+.switch-icon::before {
+    content: '';
+    position: absolute;
+    left: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+}
+.switch-icon::after {
+    content: '';
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    width: 6px;
+    height: 6px;
+    background: #fff;
+    border-radius: 50%;
+}
+
+.ammeter-icon {
+    background: linear-gradient(180deg, #3498db 0%, #2980b9 100%);
+    position: relative;
+    border-radius: 50%;
+}
+.ammeter-icon::before {
+    content: 'A';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 14px;
+    font-weight: bold;
+    color: white;
+}
+
+.voltmeter-icon {
+    background: linear-gradient(180deg, #9b59b6 0%, #8e44ad 100%);
+    position: relative;
+    border-radius: 50%;
+}
+.voltmeter-icon::before {
+    content: 'V';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    font-size: 14px;
+    font-weight: bold;
+    color: white;
+}
 /* 工作区样式 */
 .workspace {
     flex: 1;
