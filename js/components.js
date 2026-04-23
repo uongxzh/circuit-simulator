@@ -336,7 +336,10 @@ class Voltmeter extends Component {
  */
 class Connection {
     constructor(fromId, toId, fromPoint, toPoint, fromPointIndex = null, toPointIndex = null) {
-        this.id = `${fromId}-${toId}`;
+        // 使用端点索引确保同一对组件间的多个连接有唯一ID
+        const fpi = fromPointIndex !== null && fromPointIndex !== undefined ? fromPointIndex : (fromPoint && fromPoint.index !== undefined ? fromPoint.index : 0);
+        const tpi = toPointIndex !== null && toPointIndex !== undefined ? toPointIndex : (toPoint && toPoint.index !== undefined ? toPoint.index : 1);
+        this.id = `${fromId}-${fpi}-${toId}-${tpi}`;
         this.fromComponentId = fromId;
         this.toComponentId = toId;
         this.fromPoint = fromPoint; // 起始点坐标

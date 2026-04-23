@@ -118,14 +118,10 @@ class CircuitSimulator {
             throw new Error('错误: 电路中没有电源');
         }
 
-        // 检查断路（没有开关闭合时）
-        const openSwitches = this.components.filter(c => c.type === 'switch' && c.isOpen());
-        if (openSwitches.length > 0) {
-            // 检查是否有至少一个闭合路径包含电源
-            const hasClosedPath = this.hasClosedCircuitPath(graph);
-            if (!hasClosedPath) {
-                throw new Error('错误: 电路断路（请闭合开关）');
-            }
+        // 检查是否有至少一个闭合路径包含电源（始终检查，不仅限于有开关时）
+        const hasClosedPath = this.hasClosedCircuitPath(graph);
+        if (!hasClosedPath) {
+            throw new Error('错误: 电路断路（请检查连接是否形成完整回路）');
         }
 
         // 检查短路（纯电源-导线回路）
@@ -730,9 +726,19 @@ class CircuitSimulator {
 
     /**
      * 获取总电流
-     * 简化：总电流 = 总电压 / 总电阻（欧姆定律）
+     * 优先使用已计算的结果，确保与 distributeSeriesCircuit 分配的值一致
      */
     getTotalCurrent() {
+        // 如果模拟正在运行且已计算过，直接取主回路电阻的电流作为总电流
+        const resistors = this.components.filter(c => c.type === 'resistor');
+        if (this.isSimulating && resistors.length > 0) {
+            // 所有串联电阻电流相同，取第一个有电流值的即可
+            for (const r of resistors) {
+                const c = r.getCurrent();
+                if (c > 0) return c;
+            }
+        }
+
         // 计算总电压
         let totalVoltage = 0;
         for (const component of this.components) {
@@ -759,7 +765,6 @@ class CircuitSimulator {
 
         // 回退：简单串联计算
         let totalResistance = 0;
-        const resistors = this.components.filter(c => c.type === 'resistor');
         const closedSwitches = this.components.filter(c => c.type === 'switch' && !c.isOpen());
         const ammeters = this.components.filter(c => c.type === 'ammeter');
 

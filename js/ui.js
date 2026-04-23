@@ -383,7 +383,31 @@ function onCanvasMouseDown(event) {
 
     // 检查是否点击在连接点上
     const connectionPoint = findConnectionPointAt(point);
-    
+
+    // 如果正在连接模式下，优先完成连接
+    if (isConnecting && connectionStart) {
+        if (connectionPoint && connectionPoint.component.id !== connectionStart.component.id) {
+            // 点击在另一个组件的连接点上，精确完成连接
+            completeConnection(connectionStart, connectionPoint);
+        } else {
+            // 未点击在有效连接点上，尝试组件最近连接点作为回退
+            const component = findComponentAt(point);
+            if (component && component.id !== connectionStart.component.id) {
+                const targetPoint = component.getNearestConnectionPoint(point);
+                const distance = point.distanceTo(targetPoint);
+                if (distance < 35) {
+                    completeConnection(connectionStart, { component, point: targetPoint, index: targetPoint.index });
+                }
+            }
+        }
+        // 清除连接状态
+        isConnecting = false;
+        connectionStart = null;
+        tempConnection = null;
+        redrawCanvas();
+        return;
+    }
+
     if (connectionPoint && !isConnecting) {
         // 开始连接
         isConnecting = true;
@@ -396,32 +420,15 @@ function onCanvasMouseDown(event) {
     const component = findComponentAt(point);
 
     if (component) {
-        // 如果正在连接，检查是否点击在另一个组件的连接点上
-        if (isConnecting && connectionStart) {
-            const targetPoint = component.getNearestConnectionPoint(point);
-            const distance = point.distanceTo(targetPoint);
-            
-            // 如果点击在目标组件的连接点附近且不是同一个组件
-            if (distance < 20 && component.id !== connectionStart.component.id) {
-                // 完成连接
-                completeConnection(connectionStart, { component, point: targetPoint });
-            }
-            
-            // 清除连接状态
-            isConnecting = false;
-            connectionStart = null;
-            tempConnection = null;
-        } else {
-            // 普通拖拽
-            selectedComponent = component;
-            selectedWire = null; // 取消导线选择
-            isDragging = true;
-            mouseOffset.x = x - component.x;
-            mouseOffset.y = y - component.y;
+        // 普通拖拽
+        selectedComponent = component;
+        selectedWire = null; // 取消导线选择
+        isDragging = true;
+        mouseOffset.x = x - component.x;
+        mouseOffset.y = y - component.y;
 
-            // 更新属性面板
-            showComponentProperties(component);
-        }
+        // 更新属性面板
+        showComponentProperties(component);
     } else {
         // 点击空白区域，检查是否是点击导线
         const wire = findWireAt(point);
@@ -435,14 +442,7 @@ function onCanvasMouseDown(event) {
             selectedWire = null;
             clearPropertiesPanel();
         }
-        
-        // 如果正在连接，点击空白处取消连接
-        if (isConnecting) {
-            isConnecting = false;
-            connectionStart = null;
-            tempConnection = null;
-        }
-        
+
         isDragging = false;
     }
 
@@ -660,7 +660,7 @@ function findComponentAt(point) {
  * 查找连接点
  */
 function findConnectionPointAt(point) {
-    const threshold = 15; // 连接点检测距离阈值
+    const threshold = 25; // 连接点检测距离阈值（增大以提升连接体验）
     
     for (const component of globalThis.circuitComponents) {
         const points = component.getConnectionPoints();
@@ -811,24 +811,27 @@ function pointToLineDistance(point, lineStart, lineEnd) {
  * 完成连接
  */
 function completeConnection(start, end) {
-    // 检查是否已存在相同连接
+    // 检查是否已存在完全相同的端点连接（基于端点索引，允许同一对组件的多端点连接）
+    const fromPointIndex = start.point && start.point.index !== undefined ? start.point.index : null;
+    const toPointIndex = end.point && end.point.index !== undefined ? end.point.index : null;
+
     const existingConnection = globalThis.connections.find(conn => {
-        const sameDirection = conn.fromComponentId === start.component.id && 
-                             conn.toComponentId === end.component.id;
-        const reverseDirection = conn.fromComponentId === end.component.id && 
-                                conn.toComponentId === start.component.id;
+        const sameDirection = conn.fromComponentId === start.component.id &&
+                             conn.toComponentId === end.component.id &&
+                             conn.fromPointIndex === fromPointIndex &&
+                             conn.toPointIndex === toPointIndex;
+        const reverseDirection = conn.fromComponentId === end.component.id &&
+                                conn.toComponentId === start.component.id &&
+                                conn.fromPointIndex === toPointIndex &&
+                                conn.toPointIndex === fromPointIndex;
         return sameDirection || reverseDirection;
     });
-    
+
     if (existingConnection) {
         console.log('连接已存在，跳过');
         return;
     }
 
-    // 确保传递端点索引
-    const fromPointIndex = start.point && start.point.index !== undefined ? start.point.index : null;
-    const toPointIndex = end.point && end.point.index !== undefined ? end.point.index : null;
-    
     const connection = new Connection(
         start.component.id,
         end.component.id,
@@ -1022,6 +1025,17 @@ function updateResistorProperties(componentId) {
     }
 
     console.log('电阻属性已更新');
+
+    // 如果正在模拟，重新分析电路以更新电流/电压显示
+    if (globalThis.circuitSimulator && globalThis.circuitSimulator.isSimulating) {
+        try {
+            globalThis.circuitSimulator.analyzeCircuit();
+            updateMeasurements();
+            redrawCanvas();
+        } catch (e) {
+            console.warn('重新分析电路失败:', e.message);
+        }
+    }
 }
 
 /**
